@@ -36,12 +36,20 @@ Modes: **QUICK** (single fact-check, ≤6 searches, no interrogation) vs **FULL*
 
 ## Install
 
+**OpenClaw users (ClawHub — versioned, auto-updatable):**
+
 ```bash
-# Claude Code / any Agent Skills-compatible agent (Codex, Cursor, Gemini CLI, ZCode, OpenClaw)
+clawhub search cite-holmes        # find it on the registry
+clawhub install @docsor1212/cite-holmes
+```
+
+**Any Agent Skills-compatible agent** (Claude Code, Codex, Cursor, Gemini CLI, ZCode):
+
+```bash
 git clone https://github.com/docsor1212/cite-holmes.git ~/.claude/skills/cite-holmes
 ```
 
-Also available on **ClawHub** and **SkillHub** (search `cite-holmes`).
+**China mirror (SkillHub 腾讯)**: <https://skillhub.cn/skills/cite-holmes> — fast downloads inside China, 中文说明.
 
 ## Usage
 

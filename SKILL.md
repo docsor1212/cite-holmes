@@ -1,132 +1,129 @@
 ---
 name: cite-holmes
-version: 1.1.0
+version: 1.1.1
 author: DoctorQ Lab
 license: MIT
 platforms: [linux, win32, darwin]
 description: >
-  Cite Holmes（cite-holmes）：像福尔摩斯一样调查自己信源的深度研究 skill
-  （Verified Deep Research）。先澄清范围（反问式校准，防答非所问）→ 研究计划 →
-  迭代多源检索 → 引用五态交叉验证（verified/partial/unverified/unreachable/invalid）
-  → 结论按高/中/低置信度分级标注。绝不输出未验证的引用，找不到就如实说，专治
-  AI 幻觉引用。
-  触发词："深度研究"、"深入调研"、"做个调研"、"帮我研究一下"、"查证"、
-  "核查引用"、"这个说法是真的吗"、"核实一下"、"这个信息可靠吗"、"最新进展"、
-  "全面了解"、"综述一下"、"值不值得"、"哪个好"、"两相比较"、
-  "deep research"、"research report"、"fact check"、"verify this claim"、
-  "verify citations"。凡需要综合多个信息来源、要求可靠/权威/有引用支撑的问题，
-  即使没说"研究"二字也应触发。
+  Cite Holmes — deep research that interrogates its own sources (Verified Deep
+  Research). Calibrates scope first (asks 3-5 sharp questions), plans sub-questions,
+  searches iteratively across sources and languages, then machine-verifies every
+  citation (five states: verified/partial/unverified/unreachable/invalid) before
+  a confidence-graded report ships. Never outputs unverified references; treats
+  fabricated DOIs, dead links and missing sources as first-class catch targets.
+  Use whenever the user asks to "deep research", "look into", "investigate",
+  "compare A vs B", "fact check", "verify this claim", "is it true that...",
+  "check these references", "are these citations real", wants a research report
+  with sources, or needs reliable multi-source answers — even if they never say
+  the word "research".
 ---
 
-# cite-holmes（Cite Holmes）：带引用验证的深度研究
+# cite-holmes (Cite Holmes): deep research with citation verification
 
-一句话：**问题进 → 经过验证的报告出**。
+One line: **a question goes in — a verified report comes out.**
 
-与普通"搜索一下然后总结"的三个本质区别：
+Three differences from a plain "search and summarize":
 
-1. **动手前先校准**——反问锁定范围，防答非所问（一次研究最贵的浪费是研究错了问题）
-2. **结论有证据强度**——每条关键结论标注 🟢双源一致 / 🟡单权威源 / 🔴存疑
-3. **引用逐条验证**——机械检查（可达性/域名权威度）+ 语义检查（来源内容真的支持该论断），
-   未验证的引用绝不伪装成已验证
+1. **Calibrate before working** — ask sharp questions first; the most expensive
+   waste is researching the wrong question.
+2. **Conclusions carry evidence grades** — 🟢 two independent sources agree /
+   🟡 single authority / 🔴 contested.
+3. **Every citation is checked** — mechanical layer (reachability, domain
+   authority, field completeness, dedup) plus semantic layer (does the source
+   actually support the claim?). Unverified references never masquerade as real.
 
-## ⛔ 铁律（零例外）
+## ⛔ Iron rules (zero exceptions)
 
-1. **不编造**：引用必须来自本次会话真实检索/抓取到的结果。记不清的 URL 宁可重查，不凭记忆写。
-2. **不伪装**：没验证过的引用标 `unverified`；抓取失败的标 `unreachable`（≠ 不存在，需人工复核）。
-3. **冲突不回避**：来源互相矛盾时如实呈现分歧，标 🔴，写明双方各自的依据。
-4. **有预算**：检索不是无限的。QUICK ≤6 次搜索，FULL ≤15 次。到达预算仍有缺口 → 在
-   "研究缺口"一节如实交代，而不是硬凑结论。
-5. **先校准后动手**（FULL 模式）：范围/时间跨度/受众/输出格式没锁定之前不开搜。
+1. **Never fabricate**: citations must come from pages actually fetched this
+   session. Re-search rather than write URLs from memory.
+2. **Never pretend**: unchecked references are marked `unverified`; fetch
+   failures are `unreachable` (≠ nonexistent — flagged for human review).
+3. **Don't hide conflicts**: when sources disagree, present the disagreement,
+   mark 🔴, show each side's evidence.
+4. **Budgeted search**: QUICK ≤6 searches, FULL ≤15. Out of budget → state the
+   gaps honestly instead of forcing conclusions.
+5. **Calibrate before searching** (FULL mode): scope / timeframe / audience /
+   output format must be locked first.
 
-## 第 0 步：模式选择
+## Step 0: mode selection
 
-| 模式 | 适用 | 校准 | 搜索预算 | 产出 |
+| Mode | Fits | Calibration | Budget | Output |
 |---|---|---|---|---|
-| **QUICK** | 单点事实核查："这个说法是真的吗"、"XX 是哪年发布的" | 免（信息已够） | ≤6 次 | 简版报告 |
-| **FULL** | 开放性研究："XX 领域最新进展"、"A 和 B 怎么选"、"做个调研" | 必须反问 | ≤15 次 | 完整报告 |
+| **QUICK** | Single fact-check: "is this claim true", "when was X released" | skipped | ≤6 | short report |
+| **FULL** | Open research: "state of X", "A vs B", "do a survey" | mandatory | ≤15 | full report |
 
-判断标准：问题能否用一个可验证的事实回答 → QUICK；需要综合权衡、多角度对比 → FULL。
-用户说"快查/简单核实"强制 QUICK；说"深挖/彻底/全面"强制 FULL。拿不准时默认 FULL。
+A question answerable by one verifiable fact → QUICK. Needs synthesis or
+trade-offs → FULL. "Quick check" forces QUICK; "thorough/comprehensive" forces
+FULL. When unsure, default FULL.
 
-## 五阶段工作流
+## Five-phase workflow
 
-### 1. CALIBRATE 校准（仅 FULL）
+### 1. CALIBRATE (FULL only)
 
-一次性提出 3–5 个高杠杆问题（别挤牙膏式连环追问），覆盖：
+Ask 3–5 high-leverage questions at once (no drip-feeding): scope, timeframe,
+audience/depth, output format, decision context. Never re-ask what the user
+already provided. If the user declines ("your call"), proceed with stated
+defaults.
 
-- **范围**：研究的主问题拆成哪些子问题？明确排除什么？
-- **时间**：只要最新（近 12 个月）还是要历史脉络？
-- **受众与深度**：给外行看的入门综述，还是给内行看的技术对比？
-- **输出**：报告默认 Markdown；用户要 HTML/表格/归墟发布时按需切换。
-- **决策背景**（如有）：这个研究是为了做什么决定？——决定哪些差异点值得深挖。
+### 2. PLAN
 
-用户在提问中已经给出的信息不要重复问。用户拒绝回答/说"你看着办"→ 按合理默认走并在
-计划里声明假设。
+Show a short plan: 3–7 sub-questions, source priority (primary/official >
+major media > community/blog as leads only), budget.
 
-### 2. PLAN 规划
+### 3. SEARCH (iterative, not one pass)
 
-产出研究计划并**亮给用户看**（简短，不啰嗦）：
+**Read `references/search-strategies.md` first** (diamond expansion, source
+pyramid, query matrix, gap-driven iteration). Essentials: each round targets
+one sub-question; evolve queries with discovered terms; search both English
+and Chinese for topics that span both internets; fetch full text of the 2–5
+most valuable sources (never conclude from search snippets); verify key
+numbers/dates in the original page before quoting.
 
-```
-## 研究计划
-- 子问题：① … ② … ③ …（3–7 个，每个都可独立回答）
-- 信源优先级：一手/官方 > 权威媒体 > 社区/博客（仅作线索，不作最终依据）
-- 预算：N 次搜索 + M 次页面抓取
-```
+### 4. VERIFY (the heart of this skill)
 
-### 3. SEARCH 检索（迭代，不是一遍过）
+Register every reference in `research_refs.json` (schema in
+`references/report-template.md`), then verify on two layers:
 
-**先读 `references/search-strategies.md`**（菱形扩展、信源金字塔、搜索词矩阵、
-缺口驱动的迭代逻辑）再动手。核心要求：
+**Semantic (the model must do this)**: for each reference ask "does the source
+page actually support the sentence I cite it for?" → `supports` /
+`partial_support` / `not_in_source` (drop or demote).
 
-- 每轮搜索前明确"这轮要回答哪个子问题"；结束后记录"已回答什么、新缺口是什么"。
-- 检索词跟随发现演化：首轮宽撒网，后续轮用上轮挖出的术语/人名/产品名收网。
-- 中英文话题分别用中英文搜一遍（中文互联网和英文互联网的信息差经常是关键发现来源）。
-- 对最有价值的 2–5 个来源用 WebFetch 抓全文细读，不要只看搜索摘要就下结论。
-- 搜索结果里的关键数字、日期、版本号，进报告前必须能在原始页面里定位到。
-
-### 4. VERIFY 验证（本 skill 的灵魂）
-
-对**引用清单**（research_refs.json，schema 见 `references/report-template.md`）做两层验证：
-
-**语义验证（模型自己做，不可省略）**：对每条引用问——"来源页面内容真的支持我引用它
-支撑的那句话吗？"支持 → `supports`；只支持一部分 → `partial_support`；对不上 →
-`not_in_source`（这条引用必须丢弃或降级为"线索"）。
-
-**机械验证（跑脚本）**：
+**Mechanical (run the script)**:
 
 ```bash
 python scripts/verify_refs.py --refs research_refs.json --out verify_report.md
 ```
 
-五态判定：`verified`（可达 + 权威源 + 字段全）/ `partial`（可达但社区源或字段缺）/
-`unreachable`（404/超时，needs_human_check）/ `invalid`（格式错误）/ `unverified`
-（未检查）。脚本用法与判定细则见脚本 `--help` 和 `references/report-template.md`。
+Five verdicts: `verified` / `partial` / `unreachable` (needs_human_check) /
+`invalid` / `unverified`. See the script's `--help` for options (`--offline`,
+`--strict` for CI).
 
-### 5. SYNTHESIZE 综合
+### 5. SYNTHESIZE
 
-按 `references/report-template.md` 的骨架输出报告。核心原则：
+Follow the skeleton in `references/report-template.md`: executive summary
+first; every key conclusion carries a confidence grade + citation ids; the
+reference table carries verdicts; `unverified/unreachable` items live only in
+the "human review" section; finish with gaps, disagreements, and follow-up
+questions.
 
-- 结论先行：执行摘要 ≤200 字，先给答案再给证据。
-- 每条关键结论后挂置信度标记与支撑引用编号，如：`GLM-5 在多轮工具调用上领先 🟢[1][3]`。
-- 引用表带五态列；`unverified/unreachable` 的引用只能出现在"待人工复核"分区，不得支撑正文结论。
-- 诚实收尾：研究缺口（没查到的）、分歧（来源打架的）、后续值得追问的 2–3 个问题。
+## Files
 
-## 工具与文件
-
-| 文件 | 何时用 |
+| File | When |
 |---|---|
-| `scripts/verify_refs.py` | VERIFY 阶段跑引用机械验证（纯标准库、跨平台、控频） |
-| `references/search-strategies.md` | SEARCH 阶段前必读 |
-| `references/report-template.md` | SYNTHESIZE 阶段照此骨架写；含 research_refs.json schema |
+| `scripts/verify_refs.py` | VERIFY phase mechanical check (pure stdlib, cross-platform, rate-limited) |
+| `references/search-strategies.md` | read before SEARCH |
+| `references/report-template.md` | skeleton for SYNTHESIZE; refs schema |
 
-## 生态衔接（可选，用户要求时）
+## Honest limits
 
-- 报告发布到归墟知识库（guixu-kb）
-- 发送报告/文件到飞书（feishu-send）
-- 医学话题可联动 cn-med-oa 补充中文文献检索与五态引用验证
+- A fabricated citation pointing to a real, live, plausible page passes the
+  mechanical layer; the semantic layer may catch it — model judgment, not a
+  guarantee.
+- `unreachable` ≠ fake.
+- Reproducible demo: `python scripts/verify_refs.py --refs examples/demo_refs.json`
+  (8 refs, 3 planted fabrications, all caught — measured 7.7 s).
 
-## 环境降级
+## Environment fallback
 
-无 WebSearch/WebFetch 工具时：如实告知只能做"用户提供材料 + verify_refs.py 机械验证"
-的受限模式，不假装能联网研究。
+Without web tools: state honestly that only the "user-supplied material +
+mechanical verification" mode is possible; never pretend to search.

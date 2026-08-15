@@ -1,28 +1,30 @@
-# Push a version tag (e.g. `git tag v1.1.0 && git push --tags`) and this
-# workflow publishes the skill to ClawHub automatically.
+# Push a version tag (e.g. `git tag v1.1.0 && git push --tags`) or run manually
+# from the Actions tab to publish this skill to ClawHub.
+#
 # One-time setup:
-#   1. Register at https://clawhub.ai, run `clawhub login` locally once
-#   2. Copy your token from ClawHub Settings → add it as the repo secret
-#      `CLAWHUB_TOKEN` (Settings → Secrets and variables → Actions)
-#   3. (Recommended) `clawhub package trusted-publisher set cite-holmes`
-#      so CI publishes are provenance-verified
-# If your network needs a proxy to reach clawhub.ai, the CLI honors HTTPS_PROXY.
+#   1. Register at https://clawhub.ai, run `npm i -g clawhub && clawhub login`
+#   2. Copy your token (ClawHub Settings, or `clawhub token`) and add it as the
+#      repo secret `CLAWHUB_TOKEN`:
+#      Settings → Secrets and variables → Actions → New repository secret
+#   3. Optionally set `owner:` below to your ClawHub publisher handle.
+#
+# Uses ClawHub's official reusable publish workflow (provenance-verified via
+# id-token). See openclaw/clawhub docs/cli.md for all inputs.
 name: Publish to ClawHub
 on:
   push:
     tags: ["v*"]
+  workflow_dispatch:
 
 jobs:
   publish:
-    runs-on: ubuntu-latest
-    steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
-        with:
-          node-version: "20"
-      - run: npm i -g clawhub
-      - run: |
-          clawhub skill publish .
-          clawhub skill tag cite-holmes "${GITHUB_REF_NAME#v}"
-        env:
-          CLAWHUB_TOKEN: ${{ secrets.CLAWHUB_TOKEN }}
+    if: startsWith(github.ref, 'refs/tags/') || github.event_name == 'workflow_dispatch'
+    permissions:
+      contents: read
+      id-token: write
+    uses: openclaw/clawhub/.github/workflows/skill-publish.yml@v1
+    with:
+      skill_path: .
+      dry_run: false
+    secrets:
+      clawhub_token: ${{ secrets.CLAWHUB_TOKEN }}

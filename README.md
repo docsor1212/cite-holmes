@@ -2,13 +2,19 @@
 
 **Deep research that interrogates its own sources.**
 
-Every AI research report you've ever read had a dirty secret: some of those polished references were probably fabricated. [Nature estimates tens of thousands of 2025 papers contain invalid AI-generated references](https://www.nature.com/articles/d41586-026-00969-z). [NeurIPS 2025 accepted papers were scanned: 100+ hallucinated citations slipped through peer review](https://medium.com/@ljingshan6/100-fake-citations-just-slipped-through-neurips-2025-peer-review-5f34f4436560).
+Every AI research report you've ever read had a dirty secret: some of those polished references were probably fabricated. [A Nature news analysis suggests tens of thousands of 2025 publications might include invalid AI-generated references](https://www.nature.com/articles/d41586-026-00969-z). [GPTZero scanned 4,841 NeurIPS 2025 submissions; as independently reported, at least 100 hallucinated citations were found across 51 accepted papers](https://medium.com/@ljingshan6/100-fake-citations-just-slipped-through-neurips-2025-peer-review-5f34f4436560).
 
 Cite Holmes is a deep-research skill with a badge and a magnifying glass: it researches like any deep-research agent — then **arrests its own citations before you can cite them**.
 
 ![demo](assets/demo.gif)
 
-*(Demo is real output: 8 references, 3 deliberately planted fabrications — a fake DOI, a dead URL, and a no-URL citation. All 3 were caught and excluded.)*
+*(Demo is real output: 8 references, 3 deliberately planted fabrications — a fake DOI, a dead URL, and a no-URL citation. All 3 were caught and excluded; the 5 real ones passed. Measured: **7.7 s for all 8** — 4.2 s of pure network checks, the rest is deliberate throttling.)*
+
+Reproduce it yourself — the planted-fakes file ships with the repo:
+
+```bash
+python scripts/verify_refs.py --refs examples/demo_refs.json
+```
 
 ## How it works
 
@@ -68,6 +74,12 @@ python scripts/verify_refs.py --refs research_refs.json --out report.md
 python scripts/verify_refs.py --refs refs.json --offline
 python scripts/verify_refs.py --refs refs.json --strict
 ```
+
+## What it won't catch (honest limits)
+
+- A fabricated citation that points to a **real, live, plausible page** passes the mechanical check. The semantic layer (the model judging whether the source actually supports the claim) may catch it — it is model judgment, not a guarantee.
+- `unreachable` ≠ fake: pages behind login walls or bot-blocking are flagged for human review, not condemned.
+- The planted fakes in our demo are exactly the catchable types (dead URL / fake DOI / missing URL). We are not claiming it catches everything.
 
 ## Why not just use deep research / a citation checker?
 

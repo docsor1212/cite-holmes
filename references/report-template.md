@@ -13,15 +13,23 @@
     "source": "来源站点或机构（如 Anthropic / Nature / Reuters）",
     "year": 2026,
     "claim": "本报告用这条引用支撑的那句话",
-    "semantic": "supports",           // supports | partial_support | not_in_source
+    "semantic": {
+      "claim": "与上层 claim 相同（或更细）",
+      "support": "supported",   // supported | partial | not_in_source | contradicted | unclear
+      "quote": "来源页原文关键句（人工复核抓手）",
+      "note": "可选备注"
+    },
     "found_via": "search#3",          // 哪轮搜索发现的，便于回溯
     "tier": "official"                // official | journal | preprint | media | community | blog | social
   }
 ]
 ```
 
-`semantic` 字段由模型在语义验证时填写；机械验证由 `scripts/verify_refs.py` 完成，两层的
-结果都要体现在最终引用表里。
+`semantic` 字段由模型在语义验证时填写（v1.11 起推荐上面的结构化对象形式；旧的
+字符串形式仍然接受，仅作注记不参与判定）。验证器把结构化判定带进
+`--export auditjson` 的 `semantic_audit` 工作底稿与报告语义区；`not_in_source` /
+`contradicted` 会把机械判定封顶为 `partial` 并转人工复核（来源存在 ≠ 来源认同）。
+机械验证由 `scripts/verify_refs.py` 完成，两层的结果都要体现在最终引用表里。
 
 ## 置信度标记规范
 
@@ -72,7 +80,7 @@
 
 ## 输出要求
 
-- 正文结论**只能**引用 `semantic=supports` 且机械验证非 `invalid` 的条目。
+- 正文结论**只能**引用 `semantic.support=supported`（旧字符串 `supports`）且机械验证非 `invalid` 的条目；`not_in_source`/`contradicted` 条目已由验证器封顶 `partial`，只可作对照线索。
 - `partial_support` 只能支撑结论中它确实支持的那半句，并在句中注明。
 - `unverified/unreachable` 一律只出现在"待人工复核"分区。
 - QUICK 模式可省略"子问题"分节，直接：执行摘要 → 核查结论（含反证）→ 引用清单。

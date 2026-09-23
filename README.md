@@ -95,6 +95,12 @@ python scripts/verify_refs.py --refs refs.json
 
 ## Install
 
+**AI agents (skills.sh / one command):**
+
+```bash
+npx skills add docsor1212/cite-holmes
+```
+
 **OpenClaw users (ClawHub — versioned, auto-updatable):**
 
 ```bash

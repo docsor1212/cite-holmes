@@ -1,19 +1,21 @@
 ---
 name: cite-holmes
-version: 1.12.0
+version: 1.13.0
 author: DoctorQ Lab
 license: MIT
 description: >-
   Deep research that interrogates its own sources (Verified Deep Research):
-  calibrates scope first (3-5 sharp questions), plans sub-questions, searches
-  iteratively across sources and languages, then machine-verifies every
-  citation (verified / partial / unverified / unreachable / invalid) before a
-  confidence-graded report ships. Never outputs unverified references;
-  fabricated DOIs, arXiv IDs and PMIDs, dead links and missing sources are
-  first-class catch targets (AI hallucination detection). Medical evidence
-  mode (Cochrane/BMJ/ClinicalTrials/ChiCTR/NMPA/CDC/NICE/Wanfang tier presets,
-  PMID existence check via NCBI E-utilities) and verified-bibliography export
-  (BibTeX + audit CSV) built in.
+  calibrates scope first (3-5 sharp questions), then searches iteratively
+  across sources and languages and machine-verifies every citation. Also works
+  as a standalone citation checker: paste any reference list and it will
+  verify citations against official registries — full citation verification
+  covering hallucinated references, fabricated DOIs, fake PMIDs and arXiv IDs,
+  stitched fakes and retracted papers. A fact check for your bibliography, not
+  just a search. Five verdicts (verified / partial / unverified / unreachable /
+  invalid); unverified references never masquerade as real (AI hallucination
+  detection). Medical evidence mode (Cochrane/BMJ/ClinicalTrials/ChiCTR/NMPA/
+  CDC/NICE/Wanfang presets, PMID existence check via NCBI E-utilities) and
+  verified-bibliography export (BibTeX + audit CSV + JSON workpaper) built in.
 when_to_use: >-
   Use when the user says "deep research", "look into", "investigate",
   "compare A vs B", "fact check", "verify this claim", "is it true that...",
@@ -126,6 +128,8 @@ Useful flags (details in `references/verification-details.md`):
 `--offline` (structure only, caps at `partial`), `--strict` (CI exit codes),
 `--mailto you@lab.edu` (Crossref polite pool — fewer rate limits),
 `--openalex-key` / `--s2-key` (API keys; env `OPENALEX_API_KEY` / `S2_API_KEY`).
+Agents that prefer tools over skills can run the bundled MCP server
+(`mcp/server.py`, FastMCP) and call the same engine as a `verify_references` tool.
 Repeat runs reuse prior verdicts from a local disk cache (default on, 7-day TTL,
 `~/.cache/cite-holmes/`; `--no-cache` / `--refresh-cache` / `--cache-ttl` to
 tune; `--strict` always bypasses it). Behind a firewall? Pass `--proxy
@@ -170,6 +174,7 @@ questions.
 | File | When |
 |---|---|
 | `scripts/verify_refs.py` | VERIFY phase mechanical check (pure stdlib, cross-platform, rate-limited) |
+| `mcp/server.py` | optional MCP server: expose `verify_references` as an MCP tool (FastMCP; same engine) |
 | `references/search-strategies.md` | read before SEARCH |
 | `references/report-template.md` | skeleton for SYNTHESIZE; refs schema |
 | `references/verification-details.md` | full option semantics, cross-check rules, thresholds |

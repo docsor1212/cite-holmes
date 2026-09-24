@@ -62,8 +62,9 @@ def main() -> int:
     if not desc and "description:" not in fm:
         fails.append("description 缺失")
     else:
-        # 折叠标量（>-）取正文块长度
-        m = re.search(r"description:\s*>-?\n((?:[ \t]+.*\n?)+)", fm)
+        # 折叠标量（>-）取正文块长度——遇下一 top-level 键即止(贪婪版会把
+        # when_to_use 一并计入致误报超长,09-24 修复)
+        m = re.search(r"description:\s*>-?\n((?:[ \t]+(?!\w+:).*\n?)+)", fm)
         dlen = len(m.group(1)) if m else len(desc)
         if dlen > 1024:
             fails.append(f"description 超长（{dlen} > 1024，会被静默丢弃）")

@@ -167,6 +167,16 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v1.13.0** — the discoverability release. EN description rewritten around
+  task-language roots (citation verification, verify citations, citation
+  checker, hallucinated references, fact check) so task-word searches on
+  skills.sh and agent skill markets finally surface it. New MCP server
+  (`mcp/server.py`, FastMCP): expose the same mechanical verification engine
+  as a `verify_references` tool for agents that prefer tools over skills —
+  official MCP Registry ready (publish-once to Smithery, mcp.so, PulseMCP).
+  Security & behavior declaration retained. 188 tests green, real-network
+  acceptance 5/5, package security self-scan clean.
+
 - **v1.12.0** — trust & transparency release. Persistent disk cache (default
   on, 7-day TTL, local SQLite): re-running or extending a bibliography reuses
   stable verdicts with zero network round-trips — the repeat-run pain behind

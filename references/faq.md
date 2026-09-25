@@ -57,6 +57,16 @@ Semantic Scholar keyless shares a rate pool; `--s2-key` / `S2_API_KEY` gets a
 dedicated lane. Crossref asks heavy users to identify themselves — pass
 `--mailto you@lab.edu` to join the polite pool.
 
+**Q: MCP 模式是什么？agent 不装 skill 怎么用？**
+v2.0.0 起仓库内置 `mcp/server.py`（FastMCP）：tools `verify_references`（机械验证）/
+`explain_verdict`（判定解释）、resources（能力矩阵/版本史）、prompts（fact-check 工作流）。
+推荐直跑：`uvx --from "git+https://github.com/docsor1212/cite-holmes#subdirectory=mcp" cite-holmes-mcp`；
+或自行准备 FastMCP 环境后运行 `python mcp/server.py`。零密钥可用；可选 API key 经环境变量注入。
+
+**Q: arXiv 论文有多个修订版怎么办？**
+v2.0.0 自动备注：引用未指定版本而论文存在多个修订版 → 提示"引用未指定版本"；
+引用指向旧版而存在更新版 → 提示最新版号（旧版可能含未修正内容）。同响应内取数，零额外请求。
+
 **Q: 验证要访问哪些外部服务？国内网络慢怎么办？**
 见上方服务清单——全部是官方学术注册库、全部 HTTPS。v1.12 起两件事让它在国内更可用：
 ① **持久磁盘缓存**默认开（7 天 TTL）：同一批引用复跑直接复用稳定判定、零外呼，

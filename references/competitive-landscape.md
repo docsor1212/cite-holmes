@@ -121,3 +121,8 @@ Honest limits 已引用）。v1.11 的 arXiv fallback 链直接回应「重跑�
 semantic_audit 把「disclosing uncertainty」落成机器可读。竞品坐标补充：学界
 工具（RefChecker=Amazon Science 开源管线、HalRef、Hallucinator）面向批量论文
 流水线；本 skill 面向 agent 研究流程，逐条实时核验，赛道不同、话术错位竞争。
+
+## MCP Registry 全景（09-25 调研）
+- 官方 MCP Registry：API freeze v0.1，publish-once 分发至 Smithery/mcp.so/GitHub MCP Registry 等子注册表
+- mcp.so ~19,700 servers；Smithery 7,000+；PulseMCP 人工策展
+- cite-holmes v2.0.0 的 mcp/server.py（FastMCP 三原语）= 注册表提交就绪形态；PyPI 打包为后续可选

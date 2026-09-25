@@ -167,6 +167,15 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v2.0.0** — MCP three-primitives server (`verify_references` + `explain_verdict`
+  tools, capability-matrix/changelog resources, fact-check workflow prompt),
+  arXiv multi-version notes (unversioned citations to multi-revision papers,
+  stale version pointers), optional `NCBI_API_KEY` (E-utilities 3→10 req/s for
+  parallel batches), and a per-reference **evidence chain** in HTML reports
+  (doi.org → retraction → S2 → OpenAlex → reachability, at a glance). First
+  Major: the transparent multi-source citation verification stack, as shipped.
+  195 tests green, real-network acceptance, package security self-scan clean.
+
 - **v1.13.0** — the discoverability release. EN description rewritten around
   task-language roots (citation verification, verify citations, citation
   checker, hallucinated references, fact check) so task-word searches on

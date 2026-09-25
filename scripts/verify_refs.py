@@ -82,12 +82,22 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "1.13.0"
+VERSION = "2.0.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
 # 走共享限速池，带 key 独享 1 req/s。mailto 用于 Crossref polite pool（限速更宽松）。
-_OPTS = {"openalex_key": "", "s2_key": "", "mailto": ""}
+_OPTS = {"openalex_key": "", "s2_key": "", "mailto": "", "ncbi_key": ""}
+
+
+def _ncbi_qs(extra: str = "") -> str:
+    """E-utilities 查询串:可选 NCBI API key(环境 NCBI_API_KEY/--ncbi-key,
+    3rps→10rps 提速并行批验证)。key 不落日志只进请求参数。"""
+    qs = extra
+    k = _OPTS.get("ncbi_key") or ""
+    if k:
+        qs += f"&api_key={quote(k, safe='')}"
+    return qs
 
 
 # ---------------- 主机断路器（v1.6，国内适配主攻）+ 全局网络降级（v1.10） ----------------
@@ -559,7 +569,7 @@ def pubmed_pmid_exists(pmid: str, timeout: float) -> tuple:
     返回 (exists, note)。
     """
     u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
-         f"?db=pubmed&id={pmid}&retmode=json")
+         + _ncbi_qs(f"?db=pubmed&id={pmid}&retmode=json"))
     if _cb_open(u):
         return True, _cb_skip_note(u) + "，按可达处理"
     _ncbi_rate_wait()
@@ -588,7 +598,7 @@ def pmid_doi_crosscheck(pmid: str, doi: str, timeout: float) -> tuple:
     不一致 → invalid「拼接伪造特征」；一致 → 加一致备注；登记无 DOI → 跳过。
     返回 (adjust, note)，adjust ∈ {"", "invalid"}。断路器生效。"""
     u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
-         f"?db=pubmed&id={pmid}&retmode=json")
+         + _ncbi_qs(f"?db=pubmed&id={pmid}&retmode=json"))
     if _cb_open(u):
         return "", _cb_skip_note(u) + "，DOI↔PMID 交叉未做"
     _ncbi_rate_wait()
@@ -777,8 +787,29 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
             meta_year = int(m.group(1))
     sim = difflib.SequenceMatcher(None, (title or "").lower(),
                                   meta_title.lower()).ratio()
+    # v2.0.0 arXiv 版本二级核验(零额外请求):entry id 自带版本号,与声称版本比对。
+    # 引用未指定版本且最新版>1 → 提示「该论文存在多个修订版,引用未指定」;
+    # 引用指定了旧版且最新版更高 → 提示可能有修订(同一响应内取数,零网络成本)。
+    ver_note = ""
+    eid = entry.find("a:id", ns)
+    latest_v = None
+    if eid is not None and eid.text:
+        vm = re.search(r"v(\d+)$", eid.text.strip())
+        if vm:
+            latest_v = int(vm.group(1))
+    claimed_v = None
+    cm = re.search(r"v(\d+)$", arxiv_id.strip())
+    if cm:
+        claimed_v = int(cm.group(1))
+    if latest_v and latest_v > 1:
+        if claimed_v is None:
+            ver_note = f"；注意：该论文已有 {latest_v} 个修订版本，引用未指定版本（arXiv 默认解析最新版）"
+        elif claimed_v < latest_v:
+            ver_note = (f"；注意：引用指向 v{claimed_v}，最新版为 v{latest_v}"
+                        "——请确认引用的是预期版本（旧版可能含未修正内容）")
     if not title:
-        return "", f"arXiv 元数据核验完成（引用未提供标题，无法比对；登记年份 {meta_year or '未知'}）", True
+        return "", (f"arXiv 元数据核验完成（引用未提供标题，无法比对；登记年份 "
+                    f"{meta_year or '未知'}）{ver_note}"), True
     if sim < 0.50:
         return "invalid", (f"arXiv 元数据标题相似度仅 {sim:.2f} → ID 指向的不是这篇论文，"
                            f"疑似编造或错引（arXiv 实际为《{meta_title[:60]}》）"), True
@@ -790,8 +821,8 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
         except (TypeError, ValueError):
             pass
     if sim < 0.82:
-        return "partial", f"arXiv 元数据标题相似度 {sim:.2f}，建议人工复核{year_note}", True
-    return "", f"arXiv 元数据核验一致（相似度 {sim:.2f}）{year_note}", True
+        return "partial", f"arXiv 元数据标题相似度 {sim:.2f}，建议人工复核{year_note}{ver_note}", True
+    return "", f"arXiv 元数据核验一致（相似度 {sim:.2f}）{year_note}{ver_note}", True
 
 
 def wayback_available(url: str, timeout: float) -> str:
@@ -1789,15 +1820,37 @@ def render_html(results: list, offline: bool, profile: str = "general") -> str:
         return re.sub(r"(https?://[^\s<\"]+)",
                       lambda m: f'<a href="{m.group(1)}">{m.group(1)}</a>', s)
 
+    def _chain(r: dict) -> str:
+        """v2.0.0 证据链微可视化:基于 checks 明细生成检查路径图标行。"""
+        c = r.get("checks") or {}
+        seg = []
+        if c.get("doi_metadata"):
+            seg.append(("DOI.org" + (" ✓" if c["doi_metadata"].get("matched") else " ?")))
+        if c.get("arxiv_metadata"):
+            seg.append("arXiv ✓" if c["arxiv_metadata"].get("matched") else "arXiv ?")
+        if c.get("s2"):
+            seg.append("S2 ✓" if c["s2"].get("matched") else "S2 ·")
+        if c.get("retraction"):
+            seg.append("撤稿库 ✓" if not c["retraction"].get("retracted") else "撤稿⚠")
+        if c.get("openalex"):
+            seg.append("OpenAlex ✓" if c["openalex"].get("confirmed") else "OpenAlex ·")
+        if c.get("url"):
+            seg.append("可达 ✓" if c["url"].get("reachable") else "可达 ✗")
+        if c.get("wayback"):
+            seg.append("存档 ·")
+        return " → ".join(seg)
+
     rows = []
     for r in results:
+        chain = _chain(r)
+        chain_html = (f"<br><span class='chain'>{e(chain)}</span>" if chain else "")
         rows.append(
             f"<tr><td>{r['index']}</td>"
             f"<td>{e(str(r.get('title') or ''))}</td>"
             f"<td>{e(str(r.get('tier') or ''))}</td>"
             f"<td>{r.get('http_status') if r.get('http_status') is not None else '-'}</td>"
             f"<td class='{vcls[r['verdict']]}'><b>{VERDICT_ZH[r['verdict']]}</b></td>"
-            f"<td class='note'>{linkify(r.get('note'))}</td></tr>")
+            f"<td class='note'>{linkify(r.get('note'))}{chain_html}</td></tr>")
 
     actions = {"invalid": "建议：删除或更换信源", "unreachable": "建议：人工打开原链复核",
                "unverified": "建议：在线环境重跑验证"}
@@ -1846,6 +1899,7 @@ margin:0 auto;padding:16px;max-width:960px;color:#1c2733;background:#fbfaf7;line
 h1{{font-size:1.3em}} .score{{font-size:2.6em;font-weight:700}}
 .v-ok{{color:#1a7f37}} .v-part{{color:#9a6700}} .v-unreach{{color:#b45309}}
 .v-bad{{color:#c1341b}} .v-unk{{color:#57606a}}
+.chain{{color:#57606a;font-size:.78em;opacity:.85}}
 .preok{{color:#1a7f37;background:#e9f7ee;padding:8px 12px;border-radius:6px}}
 table{{border-collapse:collapse;width:100%;font-size:.88em;background:#fff}}
 td,th{{border:1px solid #d8d2c4;padding:6px 8px;vertical-align:top;text-align:left}}
@@ -1899,6 +1953,9 @@ def main() -> int:
                     help="傻瓜模式：自动识别医学引用启用医学预设，验证后自动导出 bibtex+csv，无需其他参数")
     ap.add_argument("--openalex-key", default="",
                     help="OpenAlex API key（2026-02 起生产调用需要；也可用环境变量 OPENALEX_API_KEY）")
+    ap.add_argument("--ncbi-key", default="",
+                    help="NCBI E-utilities API key（3→10 req/s 提速并行批验证；"
+                         "也可用环境变量 NCBI_API_KEY）")
     ap.add_argument("--s2-key", default="",
                     help="Semantic Scholar API key（免钥为共享限速池；也可用环境变量 S2_API_KEY）")
     ap.add_argument("--mailto", default="",
@@ -1932,6 +1989,7 @@ def main() -> int:
     _OPTS.update({
         "openalex_key": args.openalex_key or os.environ.get("OPENALEX_API_KEY", ""),
         "s2_key": args.s2_key or os.environ.get("S2_API_KEY", ""),
+        "ncbi_key": args.ncbi_key or os.environ.get("NCBI_API_KEY", ""),
         "mailto": args.mailto.strip(),
     })
 

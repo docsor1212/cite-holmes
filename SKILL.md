@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 1.13.0
+version: 2.0.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -129,7 +129,12 @@ Useful flags (details in `references/verification-details.md`):
 `--mailto you@lab.edu` (Crossref polite pool — fewer rate limits),
 `--openalex-key` / `--s2-key` (API keys; env `OPENALEX_API_KEY` / `S2_API_KEY`).
 Agents that prefer tools over skills can run the bundled MCP server
-(`mcp/server.py`, FastMCP) and call the same engine as a `verify_references` tool.
+(`mcp/server.py`, FastMCP) exposing three primitives: tools `verify_references`
+and `explain_verdict` (plain-language verdict explanations), resources
+(capability matrix, changelog), and a `fact_check_workflow` prompt template.
+arXiv multi-version references are flagged (unversioned citations to
+multi-revision papers, stale version pointers). Optional `NCBI_API_KEY`
+raises E-utilities throughput from 3 to 10 req/s for parallel batches.
 Repeat runs reuse prior verdicts from a local disk cache (default on, 7-day TTL,
 `~/.cache/cite-holmes/`; `--no-cache` / `--refresh-cache` / `--cache-ttl` to
 tune; `--strict` always bypasses it). Behind a firewall? Pass `--proxy
@@ -212,7 +217,8 @@ questions.
   contacted; no telemetry, no analytics, no data collection.
 - Your reference lists and reports stay on your machine — the only outbound
   payloads are the identifiers and titles you asked to verify.
-- Optional environment variables `OPENALEX_API_KEY` / `S2_API_KEY` authenticate
+- Optional environment variables `OPENALEX_API_KEY` / `S2_API_KEY` /
+  `NCBI_API_KEY` authenticate
   your own requests to those two APIs and are never sent anywhere else. The
   local verdict cache lives under `~/.cache/cite-holmes/` (`--no-cache` to
   disable).

@@ -13,6 +13,7 @@
     "source": "来源站点或机构（如 Anthropic / Nature / Reuters）",
     "year": 2026,
     "claim": "本报告用这条引用支撑的那句话",
+    "triples": [{"subject": "...", "relation": "...", "object": "...", "span": "原文出处片段"}],  # L1 原子声明分解(v3.0.0)
     "semantic": {
       "claim": "与上层 claim 相同（或更细）",
       "support": "supported",   // supported | partial | not_in_source | contradicted | unclear

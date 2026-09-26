@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "2.0.0"
+VERSION = "3.0.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -222,6 +222,38 @@ def bib_safe(value: str) -> str:
 # 归一化到 0-100，等级 A(>=85) B(70-84) C(50-69) D(<50)
 SCORE_WEIGHTS = {"verified": 10, "partial": 4, "unreachable": 0,
                  "unverified": -2, "invalid": -8}
+
+
+def render_bluf(results: list, scorecard: dict) -> str:
+    """v3.0.0 BLUF 双读者前置块（业界空白,cite-holmes 定义）：人类 3 秒 + AI 可直接解析。
+    YAML 头: verdict/key_numbers/blocker/next_action；正文首屏 5 行 TL;DR。"""
+    c = scorecard["counts"]
+    n = scorecard["total"]
+    if c["invalid"]:
+        verdict = f"不建议直接使用：{c['invalid']} 条编造/无效引用必须先清除"
+        blocker = f"{c['invalid']} 条 invalid"
+        action = "删除或更换 invalid 信源后重跑"
+    elif c["unreachable"] or c["unverified"]:
+        verdict = f"基本可用但有保留：{c['unreachable']} 条不可达/{c['unverified']} 条未验需人工复核"
+        blocker = f"{c['unreachable'] + c['unverified']} 条待复核"
+        action = "打开 Wayback 链核对不可达项,或联网重跑"
+    elif c["partial"]:
+        verdict = f"可用：{c['verified']}/{n} 条 verified,{c['partial']} 条 partial 需降级使用"
+        blocker = f"{c['partial']} 条 partial"
+        action = "partial 项在正文引用时注明保留意见"
+    else:
+        verdict = f"全部 verified（{n} 条）——可进入投稿/正文流程"
+        blocker = "无"
+        action = "可直接 --export bibtex 导出参考文献"
+    y = ("---\n"
+         f"verdict: {verdict}\n"
+         f"key_numbers: CiteScore {scorecard['score']}/100 ({scorecard['grade']}), "
+         f"verified {c['verified']}/{n}, invalid {c['invalid']}, 撤稿/复核 {sum(1 for r in results if r.get('needs_human_check'))}\n"
+         f"blocker: {blocker}\n"
+         f"next_action: {action}\n"
+         f"cite_holmes_version: {VERSION}\n"
+         "---")
+    return y
 
 
 def compute_scorecard(results: list) -> dict:
@@ -532,6 +564,13 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
     if not title:
         return (jadj or aadj), (f"DOI 元数据核验完成（引用未提供标题，无法比对；"
                                 f"登记年份 {meta_year or '未知'}）{jnote}{anote}"), True
+    def _has_cjk(t):
+        return any("\u4e00" <= c <= "\u9fff" for c in str(t or ""))
+    # v3.0.0 跨语言守卫：中文声称 vs 英文登记（或反之）相似度天然低——
+    # 跨语言不可比不判 invalid,降 partial 转人工(与期刊名核查同款守卫)
+    if title and sim < 0.50 and (_has_cjk(title) != _has_cjk(meta_title)):
+        return "partial", (f"跨语言标题无法机器比对（声称中文/登记英文或反之,相似度 "
+                           f"{sim:.2f} 不作编造依据）→ 建议人工核对"), True
     if title and sim < 0.50:
         return "invalid", (f"DOI 元数据标题相似度仅 {sim:.2f} → DOI 指向的不是这篇论文，"
                            f"疑似编造或错引（DOI 实际为《{str(meta_title)[:60]}》）"), True
@@ -810,6 +849,11 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
     if not title:
         return "", (f"arXiv 元数据核验完成（引用未提供标题，无法比对；登记年份 "
                     f"{meta_year or '未知'}）{ver_note}"), True
+    def _has_cjk_a(t):
+        return any("\u4e00" <= c <= "\u9fff" for c in str(t or ""))
+    if sim < 0.50 and (_has_cjk_a(title) != _has_cjk_a(meta_title)):
+        return "partial", (f"跨语言标题无法机器比对（相似度 {sim:.2f} 不作编造依据）"
+                           "→ 建议人工核对"), True
     if sim < 0.50:
         return "invalid", (f"arXiv 元数据标题相似度仅 {sim:.2f} → ID 指向的不是这篇论文，"
                            f"疑似编造或错引（arXiv 实际为《{meta_title[:60]}》）"), True
@@ -1010,6 +1054,59 @@ def openalex_title_check(title: str, timeout: float) -> str:
     except Exception:
         _cb_record(url, True)
         return ""
+
+
+def s2_citation_contexts(doi: str, timeout: float, max_samples: int = 3) -> dict:
+    """v3.0.0 L3 引文语境层（Scite 平替的数据面）：对已 verified 的 DOI 引文拉取
+    Semantic Scholar citations 端点(fields=contexts,intents,isInfluential)。
+    产出「学界评价」素材：被引次数、引用语境摘录（后续文献如何提及本文）、
+    intents 分类（background/methodology/result）、influential 标记。
+    诚实边界：S2 contexts 覆盖率不均（实测部分空）——返回 coverage 字段如实标注，
+    绝不装作全知。失败静默跳过（语境是增强信号,非判定依据）。CC BY 4.0 数据源。
+    返回 {}（无数据）或 {"cited_by": int, "samples": [{"context","intents","influential","citing_title"}],
+    "coverage": float}。"""
+    url = ("https://api.semanticscholar.org/graph/v1/paper/DOI:"
+           + quote(doi, safe="") + "/citations?fields=contexts,intents,isInfluential,title&limit=30")
+    key = _OPTS.get("s2_key") or ""
+    if key:
+        url += "&api_key=" + quote(key, safe="")
+    if _cb_open(url):
+        return {}
+    for attempt in range(2):
+        _s2_rate_wait()
+        try:
+            headers = {"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"}
+            if key:
+                headers["x-api-key"] = key
+            req = urllib.request.Request(url, headers=headers)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                _cb_record(url, False)
+                data = (json.loads(resp.read().decode("utf-8", "ignore")) or {})
+            break
+        except urllib.error.HTTPError as e:
+            _cb_record(url, False)
+            if e.code == 429 and attempt == 0:
+                time.sleep(6)  # S2 共享池限流常态：单次退避
+                continue
+            return {}
+        except Exception:
+            _cb_record(url, True)
+            return {}
+    else:
+        return {}
+    items = data.get("data") or []
+    if not items:
+        return {"cited_by": 0, "samples": [], "coverage": 0.0}
+    with_ctx = [it for it in items if (it.get("contexts") or [])]
+    samples = []
+    for it in with_ctx[:max_samples]:
+        cp = it.get("citingPaper") or {}
+        samples.append({"context": (it.get("contexts") or [""])[0][:220],
+                        "intents": it.get("intents") or [],
+                        "influential": bool(it.get("isInfluential")),
+                        "citing_title": (cp.get("title") or "")[:80]})
+    return {"cited_by": len(items), "samples": samples,
+            "coverage": round(len(with_ctx) / len(items), 2)}
 
 
 _S2_LAST = [0.0]
@@ -1433,6 +1530,22 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
             if s2t_note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + s2t_note
 
+    # v3.0.0 L3 引文语境层：verified 的 DOI 引文追加学界评价（默认开,--no-contexts 关）
+    if (not offline and _OPTS.get("contexts", True) and out["doi"]
+            and DOI_RE.match(out["doi"])):
+        ctx = s2_citation_contexts(out["doi"], timeout)
+        out["checks"]["citation_contexts"] = {
+            "ran": True, "cited_by": ctx.get("cited_by", 0)}
+        if ctx:
+            out["citation_contexts"] = ctx
+            n = ctx["cited_by"]
+            cov = ctx.get("coverage", 0)
+            note_ctx = (f"学界评价：被引 {'≥' if n >= 30 else ''}{n} 次"
+                        f"（语境覆盖率 {cov:.0%}）")
+            if ctx["samples"]:
+                note_ctx += "；后续文献如是以引用：《" + ctx["samples"][0]["citing_title"] + "》"
+            out["note"] = (out["note"] + "；" if out["note"] else "") + note_ctx
+
     miss = missing_fields(ref)
     if out["tier"] in TRUSTED_TIERS and not miss:
         out["verdict"] = "verified"
@@ -1550,6 +1663,144 @@ def _dc_key(ref: dict, profile: str) -> str:
     basis["_p"] = profile
     raw = json.dumps(basis, sort_keys=True, ensure_ascii=False)
     return hashlib.sha1(raw.encode("utf-8")).hexdigest()
+
+
+# ---------------- L4 证据升级级联（v3.0.0,DeepSciVerify 两级联开源化） ----------------
+
+def fetch_pubmed_abstract(pmid: str, timeout: float) -> str:
+    """L4 Phase1 证据源：E-utilities efetch 取摘要（夜间雷达管线同源）。失败返回 ""。"""
+    u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
+         + _ncbi_qs(f"?db=pubmed&id={pmid}&rettype=abstract&retmode=text"))
+    if _cb_open(u):
+        return ""
+    try:
+        req = urllib.request.Request(u, headers={
+            "User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            _cb_record(u, False)
+            return r.read().decode("utf-8", "ignore")[:4000]
+    except Exception:
+        _cb_record(u, True)
+        return ""
+
+
+def fetch_fulltext(arxiv_id: str, timeout: float) -> str:
+    """L4 Phase2 全文源：arXiv HTML（ar5iv 镜像,优先）/abs 页兜底。失败返回 ""。"""
+    aid = re.sub(r"v\d+$", "", arxiv_id)
+    for url in (f"https://ar5iv.labs.arxiv.org/html/{aid}",
+                f"https://arxiv.org/abs/{aid}"):
+        if _cb_open(url):
+            continue
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{VERSION})"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                _cb_record(url, False)
+                text = r.read().decode("utf-8", "ignore")
+            # 粗剥 HTML 标签
+            return re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)[^>]*>.*?</\1>",
+                                                  " ", text, flags=re.S))[:120000]
+        except Exception:
+            _cb_record(url, True)
+    return ""
+
+
+def chunk_text(text: str, size: int = 900, overlap: int = 120) -> list:
+    """段落分块（字符级,重叠防切断句界证据）。"""
+    if not text:
+        return []
+    chunks, i = [], 0
+    while i < len(text):
+        chunks.append(text[i:i + size])
+        i += size - overlap
+    return chunks
+
+
+def _embed_ollama(texts: list) -> list:
+    """bge-m3 嵌入（本机 ollama,HTTP 零依赖）。不可用返回 [] → 调用方降级 TF-IDF。"""
+    try:
+        payload = json.dumps({"model": "bge-m3", "input": texts}).encode()
+        req = urllib.request.Request("http://127.0.0.1:11434/api/embed",
+                                     data=payload,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=60) as r:
+            return json.loads(r.read().decode()).get("embeddings") or []
+    except Exception:
+        return []
+
+
+def _tfidf_top(query: str, chunks: list, k: int = 2) -> list:
+    """TF-IDF 保底检索（无 ollama 时）。纯标准库实现,选 top-k 索引。"""
+    import math
+    def tokens(t):
+        return re.findall(r"[a-zA-Z0-9\u4e00-\u9fff]+", t.lower())
+    q = tokens(query)
+    if not q or not chunks:
+        return list(range(min(k, len(chunks))))
+    df = {}
+    for ch in chunks:
+        for w in set(tokens(ch)):
+            df[w] = df.get(w, 0) + 1
+    scores = []
+    for ch in chunks:
+        toks = tokens(ch)
+        tf = {}
+        for w in toks:
+            tf[w] = tf.get(w, 0) + 1
+        sc = sum(tf.get(w, 0) * math.log((len(chunks) + 1) / (df.get(w, 0) + 1))
+                 for w in q)
+        scores.append(sc)
+    return sorted(range(len(chunks)), key=lambda i: -scores[i])[:k]
+
+
+def retrieve_evidence(query: str, fulltext: str, k: int = 2) -> list:
+    """L4 Phase2 段落检索：bge-m3 余弦 top-k；ollama 不可用降级 TF-IDF（保底）。"""
+    chunks = chunk_text(fulltext)
+    if not chunks:
+        return []
+    embs = _embed_ollama([query] + chunks)
+    if len(embs) == len(chunks) + 1 and embs[0]:
+        import math
+        q = embs[0]
+        norms = [math.sqrt(sum(x * x for x in e)) or 1.0 for e in embs]
+        scores = [sum(a * b for a, b in zip(q, e)) / (norms[0] * n)
+                  for e, n in zip(embs[1:], norms[1:])]
+        top = sorted(range(len(chunks)), key=lambda i: -scores[i])[:k]
+        return [chunks[i] for i in top]
+    return [chunks[i] for i in _tfidf_top(query, chunks, k)]
+
+
+def judge_endpoint_available() -> bool:
+    """L2 外置裁判端点是否配置(--judge-url,OpenAI 兼容:ollama/llama-server/GLM 网关)。"""
+    return bool(_OPTS.get("judge_url"))
+
+
+def judge_claim_via_endpoint(claim: str, evidence: str, timeout: float = 60) -> dict:
+    """L4 裁判调用：外部 OpenAI 兼容端点判 SUPPORTS/CONTRADICTS/NEI。
+    skill 只出提示词框架与解析——裁判模型由用户自备（零依赖不破,审核安全）。
+    无端点返回 {"verdict": "NEI", "degraded": "no-judge-endpoint"}。"""
+    if not judge_endpoint_available():
+        return {"verdict": "NEI", "degraded": "no-judge-endpoint"}
+    prompt = ("你是证据核查裁判。给定 CLAIM 与 EVIDENCE,只输出三选一标签：\n"
+              "SUPPORTS（证据支持声明）/ CONTRADICTS（证据反驳声明）/ NEI（证据不足）。\n\n"
+              f"CLAIM: {claim[:800]}\n\nEVIDENCE: {evidence[:3000]}\n\n标签:")
+    try:
+        body = json.dumps({"model": _OPTS.get("judge_model", "qwen3.8-27b"),
+                           "messages": [{"role": "user", "content": prompt}],
+                           "temperature": 0, "max_tokens": 8}).encode()
+        req = urllib.request.Request(
+            _OPTS["judge_url"].rstrip("/") + "/chat/completions", data=body,
+            headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            out = (json.loads(r.read().decode("utf-8", "ignore"))
+                   .get("choices", [{}])[0].get("message", {}).get("content", ""))
+        tag = out.strip().upper()
+        for v in ("SUPPORTS", "CONTRADICTS", "NEI"):
+            if v in tag:
+                return {"verdict": v}
+        return {"verdict": "NEI", "degraded": f"unparsed-reply:{out[:40]}"}
+    except Exception as e:
+        return {"verdict": "NEI", "degraded": f"endpoint-error:{type(e).__name__}"}
 
 
 def _dc_path(args) -> str:
@@ -1706,13 +1957,17 @@ def export_audit(results: list, path: str, offline: bool, profile: str) -> None:
             "openalex": "OpenAlex 书目级存在性（只确认不降级）",
             "wayback": "Wayback Machine 存档对照（unreachable 时）",
             "doi_pmid_crosscheck": "DOI↔PMID 拼接伪造检测",
-            "semantic_audit": "语义层工作底稿（v1.11，模型判定结构化透出；not_in_source/contradicted 封顶 partial）"},
+            "semantic_audit": "语义层工作底稿（v1.11，模型判定结构化透出；not_in_source/contradicted 封顶 partial）",
+            "citation_contexts": "L3 引文语境层（v3.0.0，S2 citations contexts/intents——学界评价）",
+            "l4_evidence_cascade": "L4 证据升级级联（v3.0.0，摘要级裁判→NEI 升级全文段落检索）"},
         "results": [{"index": r.get("index"), "title": r.get("title"),
                      "verdict": r.get("verdict"), "tier": r.get("tier"),
                      "http_status": r.get("http_status"),
                      "needs_human_check": bool(r.get("needs_human_check")),
                      "checks": r.get("checks") or {},
                      "semantic_audit": r.get("semantic_audit"),
+                     "citation_contexts": r.get("citation_contexts"),
+                     "triples": (r.get("semantic_audit") or {}).get("triples", []),
                      "note": r.get("note", "")}
                     for r in results],
     }
@@ -1740,6 +1995,7 @@ def render_md(results: list, offline: bool, profile: str = "general") -> str:
     sc = compute_scorecard(results)
     c = sc["counts"]
     lines = [
+        render_bluf(results, sc), "",
         "# 引用机械验证报告",
         f"- 验证器：verify_refs.py v{VERSION} · 模式：{'offline（未联网）' if offline else 'online'}"
         + (" · 医学信源预设" if profile == "medical" else ""),
@@ -1748,6 +2004,7 @@ def render_md(results: list, offline: bool, profile: str = "general") -> str:
         lines.append("- ⚠️ 免责声明：本报告仅为信源机械核验，不构成证据分级结论或医疗建议；"
                      "预印本/社区层来源不得支撑医学结论。")
     lines.append(f"- {precheck_conclusion(sc)}")
+
     lines += [
         "",
         "## CiteScore 置信度评分",
@@ -1889,6 +2146,9 @@ def render_html(results: list, offline: bool, profile: str = "general") -> str:
            "或医疗建议；预印本/社区层来源不得支撑医学结论。</p>") if profile == "medical" else ""
     pcls = "disclaim" if sc["counts"]["invalid"] or sc["counts"]["unreachable"] or sc["counts"]["unverified"] else "preok"
     pre = (f"<p class='{pcls}'>{e(precheck_conclusion(sc))}</p>")
+    bluf = render_bluf(results, sc)
+    bluf_v = html_escape("\n".join(l for l in bluf.splitlines()
+                                if not l.startswith("---")))
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -1899,6 +2159,7 @@ margin:0 auto;padding:16px;max-width:960px;color:#1c2733;background:#fbfaf7;line
 h1{{font-size:1.3em}} .score{{font-size:2.6em;font-weight:700}}
 .v-ok{{color:#1a7f37}} .v-part{{color:#9a6700}} .v-unreach{{color:#b45309}}
 .v-bad{{color:#c1341b}} .v-unk{{color:#57606a}}
+.bluf{{background:#eef6ff;padding:10px 12px;border-radius:6px;font-size:.85em;white-space:pre-wrap;margin:8px 0}}
 .chain{{color:#57606a;font-size:.78em;opacity:.85}}
 .preok{{color:#1a7f37;background:#e9f7ee;padding:8px 12px;border-radius:6px}}
 table{{border-collapse:collapse;width:100%;font-size:.88em;background:#fff}}
@@ -1909,6 +2170,10 @@ td.note{{word-break:break-all}} a{{color:#0b5394;word-break:break-all}}
 border-top:1px solid #d8d2c4;padding-top:8px}}
 </style></head><body>
 <h1>引用机械验证报告</h1>
+<!-- cite-holmes BLUF machine-readable
+{bluf}
+-->
+<pre class="bluf">{bluf_v}</pre>
 <p class="score">{sc['score']}<span style="font-size:.45em;color:#57606a"> / 100 · {sc['grade']} 级</span></p>
 <p class="meta">验证器 verify_refs.py v{VERSION} · 模式：{'offline（未联网）' if offline else 'online'}
 {' · 医学信源预设' if profile == 'medical' else ''}<br>
@@ -1953,6 +2218,13 @@ def main() -> int:
                     help="傻瓜模式：自动识别医学引用启用医学预设，验证后自动导出 bibtex+csv，无需其他参数")
     ap.add_argument("--openalex-key", default="",
                     help="OpenAlex API key（2026-02 起生产调用需要；也可用环境变量 OPENALEX_API_KEY）")
+    ap.add_argument("--judge-url", default="",
+                    help="L4 外置裁判端点（OpenAI 兼容 /chat/completions,如 ollama/llama-server;"
+                         "自备模型,cite-holmes 只出框架——零依赖不破）")
+    ap.add_argument("--judge-model", default="qwen3.8-27b",
+                    help="L4 裁判模型名（配合 --judge-url）")
+    ap.add_argument("--no-contexts", action="store_true",
+                    help="关闭 L3 引文语境层（v3.0.0 默认开：verified 引文拉取 S2 引用语境/学界评价）")
     ap.add_argument("--ncbi-key", default="",
                     help="NCBI E-utilities API key（3→10 req/s 提速并行批验证；"
                          "也可用环境变量 NCBI_API_KEY）")
@@ -1991,6 +2263,9 @@ def main() -> int:
         "s2_key": args.s2_key or os.environ.get("S2_API_KEY", ""),
         "ncbi_key": args.ncbi_key or os.environ.get("NCBI_API_KEY", ""),
         "mailto": args.mailto.strip(),
+        "contexts": not args.no_contexts,
+        "judge_url": args.judge_url.strip(),
+        "judge_model": args.judge_model.strip(),
     })
 
     if not args.refs and not args.claims:
@@ -2144,6 +2419,7 @@ def main() -> int:
     json_path = args.json_out or (args.out.rsplit(".", 1)[0] + ".json")
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump({"version": VERSION, "profile": args.profile, "offline": args.offline,
+                   "bluf": render_bluf(results, scorecard),
                    "scorecard": scorecard, "results": results},
                   f, ensure_ascii=False, indent=2)
     print(f"CiteScore: {scorecard['score']}/100 ({scorecard['grade']} 级，{scorecard['total']} 条)")

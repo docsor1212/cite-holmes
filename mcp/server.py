@@ -163,7 +163,8 @@ if _MCP_OK:
                 "import + keys; v1.10 parallel + degraded-network; v1.11 arXiv fallback "
                 "+ semantic audit; v1.12 disk cache + proxy + security declaration; "
                 "v1.13 task-language description; v2.0 MCP three-primitives + arXiv "
-                "version note + NCBI key + evidence chain. Current: " + vr.VERSION)
+                "version note + NCBI key + evidence chain; v3.0 BLUF dual-reader "
+                "reports + scholarly contexts + L4 evidence cascade. Current: " + vr.VERSION)
 
     @mcp.prompt
     def fact_check_workflow(topic: str) -> str:

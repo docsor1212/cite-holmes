@@ -167,6 +167,18 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.0.0** — the BLUF release. Every report opens with a machine-parseable
+  YAML block (verdict / key_numbers / blocker / next_action) plus a 5-line
+  human TL;DR — cite-holmes defines the "3-second dual-reader" report standard
+  (a gap no tool fills today). Scholarly reception: verified DOIs fetch
+  Semantic Scholar citation contexts (times-cited, context excerpts, coverage
+  honestly labeled — the free Scite.ai counterpart). L4 evidence cascade:
+  abstract-level judging via configurable external judge endpoints (OpenAI-
+  compatible: ollama / llama-server), NEI escalates to full-text passage
+  retrieval with local bge-m3 embeddings (TF-IDF fallback, zero hard deps).
+  Cross-language title guard (Chinese claims vs English registrations no
+  longer misjudged invalid). 210 tests green.
+
 - **v2.0.0** — MCP three-primitives server (`verify_references` + `explain_verdict`
   tools, capability-matrix/changelog resources, fact-check workflow prompt),
   arXiv multi-version notes (unversioned citations to multi-revision papers,

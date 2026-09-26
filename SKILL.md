@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 2.0.0
+version: 3.0.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -91,9 +91,12 @@ numbers/dates in the original page before quoting.
 Register every reference in `research_refs.json` (schema in
 `references/report-template.md`), then verify on two layers:
 
-**Semantic (the model must do this)**: for each reference ask "does the source
-page actually support the sentence I cite it for?" Register the verdict
-structurally so it becomes auditable workpaper, not a feeling:
+**Semantic (the model must do this — claim-triplets, L1)**: decompose each
+cited claim into atomic claim-triplets (subject–relation–object, RefChecker
+style) BEFORE judging, then verify each triplet against the source —
+granularity moves from paragraph to triple, so "which half-sentence is wrong"
+becomes answerable. Register the verdict structurally so it becomes auditable
+workpaper, not a feeling:
 `"semantic": {"claim": "...", "support": "supported|partial|not_in_source|
 contradicted|unclear", "quote": "...", "note": "..."}`. The verifier carries
 it into `--export auditjson` and a report section; `not_in_source` /
@@ -133,7 +136,14 @@ Agents that prefer tools over skills can run the bundled MCP server
 and `explain_verdict` (plain-language verdict explanations), resources
 (capability matrix, changelog), and a `fact_check_workflow` prompt template.
 arXiv multi-version references are flagged (unversioned citations to
-multi-revision papers, stale version pointers). Optional `NCBI_API_KEY`
+multi-revision papers, stale version pointers). Every report now opens with a
+**BLUF dual-reader header** — a machine-parseable YAML block (verdict /
+key_numbers / blocker / next_action) plus a 5-line human TL;DR — defining the
+"3-second readable" report standard. Verified DOIs gain a scholarly-reception
+section (Semantic Scholar citation contexts, coverage honestly labeled), and
+an L4 evidence cascade adds abstract-level judging with configurable external
+judge endpoints and bge-m3 passage retrieval (via local ollama, TF-IDF
+fallback) for full-text verification. Optional `NCBI_API_KEY`
 raises E-utilities throughput from 3 to 10 req/s for parallel batches.
 Repeat runs reuse prior verdicts from a local disk cache (default on, 7-day TTL,
 `~/.cache/cite-holmes/`; `--no-cache` / `--refresh-cache` / `--cache-ttl` to

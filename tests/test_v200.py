@@ -19,7 +19,7 @@ class TestV200(unittest.TestCase):
         vr._net_reset()
 
     def test_version_is_200(self):
-        self.assertEqual(vr.VERSION, "2.0.0")
+        self.assertEqual(vr.VERSION, "3.0.0")
 
     # ---- arXiv 版本二级核验(零额外请求,同一响应内取数) ----
 

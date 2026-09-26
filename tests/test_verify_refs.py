@@ -265,7 +265,7 @@ class TestV140(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "r.csv")), "easy 应自动导出 csv")
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "2.0.0")
+        self.assertEqual(vr.VERSION, "3.0.0")
 
 
 class TestHardening(unittest.TestCase):
@@ -1149,7 +1149,7 @@ class TestV170(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "report.json")) is False)
 
     def test_version_bumped_170(self):
-        self.assertEqual(vr.VERSION, "2.0.0")
+        self.assertEqual(vr.VERSION, "3.0.0")
 
 
 class TestV180(unittest.TestCase):
@@ -1374,7 +1374,7 @@ class TestV180(unittest.TestCase):
         self.assertTrue(r["needs_human_check"])
 
     def test_version_bumped_180(self):
-        self.assertEqual(vr.VERSION, "2.0.0")
+        self.assertEqual(vr.VERSION, "3.0.0")
 
 
 class TestV190(unittest.TestCase):
@@ -1430,7 +1430,7 @@ class TestV190(unittest.TestCase):
     # ---------- S2 第三源交叉确认 ----------
 
     def test_version_bumped_190(self):
-        self.assertEqual(vr.VERSION, "2.0.0")
+        self.assertEqual(vr.VERSION, "3.0.0")
 
     def test_s2_confirms_and_rescues_403_landing(self):
         # DOI.org 元数据获取失败（传输错误×2）→ S2 确认存在 → 着陆页 403 救回 verified
@@ -1517,8 +1517,10 @@ class TestV190(unittest.TestCase):
                                            return_value=(True, 200, "GET 200")):
             r = vr.verify_one(ref, 1, False, 5.0)
         self.assertEqual(r["verdict"], "verified")
-        self.assertEqual(m.call_count, 2, "DOI 确认后应只再查撤稿库，不调 S2")
-        self.assertNotIn("s2", r["checks"])
+        # v3.0.0 起 verified DOI 会追加 L3 引文语境调用(第 3 次外呼=S2 citations),
+        # 但 S2 存在性确认(confirm)仍不调用——语义变了,断言随更新
+        self.assertGreaterEqual(m.call_count, 2)
+        self.assertNotIn("s2", r["checks"], "S2 存在性确认仍不调(L3 语境是另一端点)")
 
     def test_s2_key_header_and_param(self):
         vr._OPTS["s2_key"] = "SECRET"

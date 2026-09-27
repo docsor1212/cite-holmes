@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 3.0.0
+version: 3.1.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -141,9 +141,12 @@ multi-revision papers, stale version pointers). Every report now opens with a
 key_numbers / blocker / next_action) plus a 5-line human TL;DR — defining the
 "3-second readable" report standard. Verified DOIs gain a scholarly-reception
 section (Semantic Scholar citation contexts, coverage honestly labeled), and
-an L4 evidence cascade adds abstract-level judging with configurable external
-judge endpoints and bge-m3 passage retrieval (via local ollama, TF-IDF
-fallback) for full-text verification. Optional `NCBI_API_KEY`
+an L4 evidence cascade (v3.1: wired into the main flow) escalates semantically
+unresolved references (not_in_source/unclear) to official full text or PubMed
+abstract, retrieves passages (bge-m3 via local ollama, TF-IDF fallback) and asks
+a configurable external judge (OpenAI-compatible /v1 or native ollama with
+thinking-mode handling) — judge findings are recorded as notes and never flip
+verdicts (conservative by design; zero network calls without --judge-url). Optional `NCBI_API_KEY`
 raises E-utilities throughput from 3 to 10 req/s for parallel batches.
 Repeat runs reuse prior verdicts from a local disk cache (default on, 7-day TTL,
 `~/.cache/cite-holmes/`; `--no-cache` / `--refresh-cache` / `--cache-ttl` to

@@ -45,6 +45,28 @@ Five phases, two modes:
 
 Modes: **QUICK** (single fact-check, ≤6 searches, no interrogation) vs **FULL** (open-ended research, ≤15 searches, calibration mandatory).
 
+## Benchmarks (v3.1, live runs + quality audit 2026-09-25)
+
+| Benchmark | Task | n | Metric | Result | Honest reading |
+|---|---|---|---|---|---|
+| SciFact (labeled splits) | fact checking, abstract top-3 evidence | 1109 | micro-acc | **0.545** | official human-labeled data; refutation recall is capped by abstract-level evidence; public test split is unlabeled (excluded). Fine-tuned SOTA is ~0.75+ - we do not claim parity. The v3.1 L4 full-text cascade is the designed remedy. |
+| SCitance (self-built, v1) | citation verification (binary) | 1620 | micro-acc | 0.947 | **infrastructure, not a headline**: our audit shows a bare bge-m3 cosine threshold scores 0.95 on this set (random off-topic negatives) - it measures topical gating, not verification. Hard-negative v2 + human-validated labels are required before any competitive claim. |
+| CFEVER dev (1k) | declared no-evidence baseline | 1000 | micro-acc | 0.233 | Chinese claims without distributed evidence text - a floor, not a score. Full scoring needs a wiki dump. |
+
+**Judge calibration (PIR null)**: with deliberately empty evidence the judge outputs
+NEI 40/40 (zero false SUPPORTS) - the model never accuses without evidence.
+
+**Audit-driven product fixes shipped in v3.1**: ollama+bge-m3 emits NaN embeddings
+for ~9% of short scientific claims (HTTP 500); `_embed_ollama` now retries per-item
+with a doubling variant before falling back to TF-IDF (was a silent degradation).
+
+What we DO claim today: first open-source five-layer citation-verification stack
+(registries / claim triplets / judge panel / citation contexts / evidence cascade),
+Chinese+English, BLUF dual-reader reports, reproducible benchmark construction and
+per-run confusion matrices. What we do NOT claim: numeric superiority over closed
+systems on incomparable benchmarks - those numbers must be earned on hardened,
+human-validated sets.
+
 ## The five citation verdicts
 
 | Verdict | Meaning |
@@ -123,7 +145,7 @@ clawhub install @docsor1212/cite-holmes        # ClawHub registry
 Cite Holmes works alongside three sibling skills:
 
 - [academic-figures](https://skillhub.cn/skills/academic-figures) — publication-ready scientific figures (22+ chart types incl. composite panels, PRISMA, forest, KM) from one command
-- [paper-polisher](https://skillhub.cn/skills/paper-polisher) — AI-detection, de-AI rewriting and terminology checks for academic writing, bilingual
+- [paper-polisher-pro](https://skillhub.cn/skills/paper-polisher-pro) — AI-rate self-check, polish guidance and AIGC-compliance labeling for academic writing, bilingual, 100% local
 - [pubmed-verifier](https://skillhub.cn/skills/pubmed-verifier) — focused PubMed citation verification for medical literature
 
 ## Usage
@@ -167,6 +189,15 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.1.0** — the closed-loop release. The L4 evidence cascade is now wired
+  into the main flow: references the semantic layer could not resolve
+  (not_in_source/unclear) escalate automatically to official PubMed abstracts or
+  arXiv full text, get passage retrieval (bge-m3, TF-IDF fallback) and a
+  configurable external judge. Judge findings annotate the report and never flip
+  verdicts; without --judge-url the run is byte-identical (zero network calls).
+  The judge client handles thinking models (qwen3 family): native ollama calls
+  use think:false + JSON-schema enum output, /v1 endpoints fall back from empty
+  content to the reasoning field (all verified live on SciFact/SCitance/CFEVER).
 - **v3.0.0** — the BLUF release. Every report opens with a machine-parseable
   YAML block (verdict / key_numbers / blocker / next_action) plus a 5-line
   human TL;DR — cite-holmes defines the "3-second dual-reader" report standard

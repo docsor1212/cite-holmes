@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.0.0"
+VERSION = "3.1.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -1090,6 +1090,10 @@ def s2_citation_contexts(doi: str, timeout: float, max_samples: int = 3) -> dict
                 continue
             return {}
         except Exception:
+            # 传输层错误（SSL EOF 等，弱网出口实测常见）：单次快速重试，仍败才记熔断
+            if attempt == 0:
+                time.sleep(2)
+                continue
             _cb_record(url, True)
             return {}
     else:
@@ -1630,6 +1634,66 @@ def apply_semantic_cap(results: list) -> None:
             f"语义层判定 {sa.get('support')}（{why}）→ 封顶 partial，需人工复核"
 
 
+def apply_l4_cascade(results: list, timeout: float) -> None:
+    """v3.1 L4 证据升级级联（主流程接入）：语义层 not_in_source/unclear 且配置了
+    --judge-url 的条目，升级取官方摘要（PMID→PubMed efetch）或全文（arXiv→ar5iv/abs）
+    做段落检索（bge-m3，TF-IDF 保底）后交外置裁判。
+    判定策略保守：裁判结论只追加注记/needs_human_check，绝不翻案（不把 partial 提回
+    verified，不动 invalid）；未配置 --judge-url 时零网络调用零行为变化（审核安全）。"""
+    if not judge_endpoint_available():
+        return
+    for r in results:
+        try:
+            sa = r.get("semantic_audit") or {}
+            if sa.get("support") not in ("not_in_source", "unclear"):
+                continue
+            claim = str(sa.get("claim") or "").strip()
+            if not claim or r.get("verdict") == "invalid":
+                continue
+            pmid = str(r.get("pmid") or "").strip()
+            m = re.search(r"(\d{4}\.\d{4,5})(?:v\d+)?", str(r.get("arxiv") or ""))
+            if pmid and PMID_RE.match(pmid):
+                src_name = "pubmed-abstract"
+                text = fetch_pubmed_abstract(pmid, timeout)
+            elif m:
+                src_name = "arxiv-fulltext"
+                text = fetch_fulltext(m.group(0), timeout)
+            else:
+                continue
+            chk = r.setdefault("checks", {})
+            if not text:
+                chk["l4_evidence_cascade"] = {"trigger": sa.get("support"),
+                                              "evidence_source": src_name,
+                                              "degraded": "no-text"}
+                continue
+            hits = retrieve_evidence(claim, text, k=2)
+            if not hits:
+                chk["l4_evidence_cascade"] = {"trigger": sa.get("support"),
+                                              "evidence_source": src_name,
+                                              "degraded": "no-chunks"}
+                continue
+            jd = judge_claim_via_endpoint(claim, "\n\n".join(hits), timeout=timeout)
+            rec = {"trigger": sa.get("support"), "evidence_source": src_name,
+                   "top_chunk_chars": len(hits[0]), "judge_verdict": jd.get("verdict")}
+            if jd.get("degraded"):
+                rec["degraded"] = jd["degraded"]
+            chk["l4_evidence_cascade"] = rec
+            add = lambda s: r.update({"note": ((r.get("note") + "；") if r.get("note") else "") + s})
+            if jd.get("verdict") == "SUPPORTS":
+                add("L4 升级：官方文本段落级证据经外置裁判判定支持（语义封顶维持，供人工复核参考）")
+            elif jd.get("verdict") == "CONTRADICTS":
+                r["needs_human_check"] = True
+                add("L4 升级：外置裁判在官方文本段落级判定反驳（与语义层否定一致）")
+            else:
+                add("L4 升级：段落检索后外置裁判仍判证据不足")
+        except Exception as e:  # 单条失败不拖垮整跑
+            try:
+                r.setdefault("checks", {})["l4_evidence_cascade"] = {
+                    "degraded": f"cascade-error:{type(e).__name__}"}
+            except Exception:
+                pass
+
+
 def _cache_key(ref: dict) -> tuple:
     """v1.10 批内缓存键：doi → url → pmid → arxiv 取首个可用标识；全无则 ()（不缓存）。
     仅作缓存命中优化，不参与判定；判定顺序与 mark_duplicates 去重一致（url/doi/pmid）。"""
@@ -1691,17 +1755,21 @@ def fetch_fulltext(arxiv_id: str, timeout: float) -> str:
                 f"https://arxiv.org/abs/{aid}"):
         if _cb_open(url):
             continue
-        try:
-            req = urllib.request.Request(url, headers={
-                "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{VERSION})"})
-            with urllib.request.urlopen(req, timeout=timeout) as r:
-                _cb_record(url, False)
-                text = r.read().decode("utf-8", "ignore")
-            # 粗剥 HTML 标签
-            return re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)[^>]*>.*?</\1>",
-                                                  " ", text, flags=re.S))[:120000]
-        except Exception:
-            _cb_record(url, True)
+        for attempt in range(2):  # v3.1：传输错误单次重试（弱网出口 SSL 间歇断流实测）
+            try:
+                req = urllib.request.Request(url, headers={
+                    "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{VERSION})"})
+                with urllib.request.urlopen(req, timeout=timeout) as r:
+                    _cb_record(url, False)
+                    text = r.read().decode("utf-8", "ignore")
+                # 粗剥 HTML 标签
+                return re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)[^>]*>.*?</\1>",
+                                                      " ", text, flags=re.S))[:120000]
+            except Exception:
+                if attempt == 0:
+                    time.sleep(2)
+                    continue
+                _cb_record(url, True)
     return ""
 
 
@@ -1717,14 +1785,31 @@ def chunk_text(text: str, size: int = 900, overlap: int = 120) -> list:
 
 
 def _embed_ollama(texts: list) -> list:
-    """bge-m3 嵌入（本机 ollama,HTTP 零依赖）。不可用返回 [] → 调用方降级 TF-IDF。"""
-    try:
-        payload = json.dumps({"model": "bge-m3", "input": texts}).encode()
+    """bge-m3 嵌入（本机 ollama,HTTP 零依赖）。不可用返回 [] → 调用方降级 TF-IDF。
+    v3.1：ollama+bge-m3 对部分短文本产 NaN（500 unsupported value: NaN，实测约 9%
+    的短科学声明）——单条 500 时对该条用「文本加倍」变体重试（语义嵌入仍有效），
+    再失败才整批降级。"""
+    def _call(inp):
+        payload = json.dumps({"model": "bge-m3", "input": inp}).encode()
         req = urllib.request.Request("http://127.0.0.1:11434/api/embed",
                                      data=payload,
                                      headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read().decode()).get("embeddings") or []
+    try:
+        try:
+            return _call(texts)
+        except urllib.error.HTTPError as e:
+            if e.code != 500 or not texts:
+                raise
+        # NaN 疑似：单条加倍逐条重建（仅查询路径,量小）
+        out = []
+        for t in texts:
+            try:
+                out.append(_call([t])[0])
+            except urllib.error.HTTPError:
+                out.append(_call([(t or " ") * 2])[0])  # 加倍变体绕 NaN
+        return out
     except Exception:
         return []
 
@@ -1775,30 +1860,69 @@ def judge_endpoint_available() -> bool:
     return bool(_OPTS.get("judge_url"))
 
 
+def _scan_label(text: str, labels: tuple) -> str:
+    """末位词边界标签提取（思考型模型的思维链里前面可能顺嘴提到其它标签）。"""
+    best = None
+    for m in re.finditer(r"\b(" + "|".join(labels) + r")\b", text or "", re.I):
+        best = m.group(1).upper()
+    return best or ""
+
+
 def judge_claim_via_endpoint(claim: str, evidence: str, timeout: float = 60) -> dict:
-    """L4 裁判调用：外部 OpenAI 兼容端点判 SUPPORTS/CONTRADICTS/NEI。
-    skill 只出提示词框架与解析——裁判模型由用户自备（零依赖不破,审核安全）。
-    无端点返回 {"verdict": "NEI", "degraded": "no-judge-endpoint"}。"""
+    """L4 裁判调用：外部端点判 SUPPORTS/CONTRADICTS/NEI（v3.1 双端点加固）。
+    - URL 以 /v1 结尾 → OpenAI 兼容（ollama /v1、llama-server、GLM 网关）；
+      content 为空时回退 reasoning 字段（qwen3 等思考模型把结论留在 reasoning——
+      实测 /no_think 软开关与 /v1 透传 think 均不可靠，故三者都做）。
+    - 其他 URL → ollama 原生 /api/chat：think:false + format JSON schema 枚举强制直答
+      （思考模型唯一可靠路径，harness 实测）。
+    判不出 → NEI + degraded 注记；无端点 → NEI + no-judge-endpoint。零新依赖。"""
     if not judge_endpoint_available():
         return {"verdict": "NEI", "degraded": "no-judge-endpoint"}
+    labels = ("SUPPORTS", "CONTRADICTS", "NEI")
     prompt = ("你是证据核查裁判。给定 CLAIM 与 EVIDENCE,只输出三选一标签：\n"
               "SUPPORTS（证据支持声明）/ CONTRADICTS（证据反驳声明）/ NEI（证据不足）。\n\n"
               f"CLAIM: {claim[:800]}\n\nEVIDENCE: {evidence[:3000]}\n\n标签:")
+    api = _OPTS["judge_url"].rstrip("/")
+    model = _OPTS.get("judge_model", "qwen3.8-27b")
     try:
-        body = json.dumps({"model": _OPTS.get("judge_model", "qwen3.8-27b"),
+        if api.endswith("/v1"):
+            body = json.dumps({"model": model,
+                               "messages": [{"role": "user", "content": prompt + " /no_think"}],
+                               "temperature": 0, "max_tokens": 96}).encode()
+            req = urllib.request.Request(api + "/chat/completions", data=body,
+                                         headers={"Content-Type": "application/json"})
+            with urllib.request.urlopen(req, timeout=timeout) as r:
+                msg = (json.loads(r.read().decode("utf-8", "ignore"))
+                       .get("choices", [{}])[0].get("message", {}))
+            tag = _scan_label(msg.get("content") or "", labels)
+            if tag:
+                return {"verdict": tag}
+            reas = msg.get("reasoning") or ""
+            tag = _scan_label(reas, labels)
+            if tag:
+                return {"verdict": tag, "degraded": "parsed-from-reasoning"}
+            return {"verdict": "NEI",
+                    "degraded": "unparsed-reply:" + (msg.get("content") or reas)[:40]}
+        schema = {"type": "object",
+                  "properties": {"label": {"type": "string", "enum": list(labels)}},
+                  "required": ["label"]}
+        body = json.dumps({"model": model,
                            "messages": [{"role": "user", "content": prompt}],
-                           "temperature": 0, "max_tokens": 8}).encode()
-        req = urllib.request.Request(
-            _OPTS["judge_url"].rstrip("/") + "/chat/completions", data=body,
-            headers={"Content-Type": "application/json"})
+                           "think": False, "stream": False, "format": schema,
+                           "options": {"temperature": 0, "num_predict": 32}}).encode()
+        req = urllib.request.Request(api + "/api/chat", data=body,
+                                     headers={"Content-Type": "application/json"})
         with urllib.request.urlopen(req, timeout=timeout) as r:
-            out = (json.loads(r.read().decode("utf-8", "ignore"))
-                   .get("choices", [{}])[0].get("message", {}).get("content", ""))
-        tag = out.strip().upper()
-        for v in ("SUPPORTS", "CONTRADICTS", "NEI"):
-            if v in tag:
-                return {"verdict": v}
-        return {"verdict": "NEI", "degraded": f"unparsed-reply:{out[:40]}"}
+            msg = json.loads(r.read().decode("utf-8", "ignore")).get("message", {})
+        out = (msg.get("content") or msg.get("thinking") or "").strip()
+        try:
+            out = json.loads(out).get("label", out)
+        except Exception:
+            pass
+        tag = _scan_label(str(out), labels)
+        if tag:
+            return {"verdict": tag}
+        return {"verdict": "NEI", "degraded": "unparsed-reply:" + str(out)[:40]}
     except Exception as e:
         return {"verdict": "NEI", "degraded": f"endpoint-error:{type(e).__name__}"}
 
@@ -1959,7 +2083,7 @@ def export_audit(results: list, path: str, offline: bool, profile: str) -> None:
             "doi_pmid_crosscheck": "DOI↔PMID 拼接伪造检测",
             "semantic_audit": "语义层工作底稿（v1.11，模型判定结构化透出；not_in_source/contradicted 封顶 partial）",
             "citation_contexts": "L3 引文语境层（v3.0.0，S2 citations contexts/intents——学界评价）",
-            "l4_evidence_cascade": "L4 证据升级级联（v3.0.0，摘要级裁判→NEI 升级全文段落检索）"},
+            "l4_evidence_cascade": "L4 证据升级级联（v3.1.0 接入主流程：语义 not_in_source/unclear 且配置裁判端点时，升级官方摘要/全文段落检索+外置裁判；判定只加固不翻案）"},
         "results": [{"index": r.get("index"), "title": r.get("title"),
                      "verdict": r.get("verdict"), "tier": r.get("tier"),
                      "http_status": r.get("http_status"),
@@ -2222,7 +2346,7 @@ def main() -> int:
                     help="L4 外置裁判端点（OpenAI 兼容 /chat/completions,如 ollama/llama-server;"
                          "自备模型,cite-holmes 只出框架——零依赖不破）")
     ap.add_argument("--judge-model", default="qwen3.8-27b",
-                    help="L4 裁判模型名（配合 --judge-url）")
+                    help="L4 裁判模型名（配合 --judge-url；URL 带 /v1=OpenAI 兼容,否则=ollama 原生 think:false+结构化输出）")
     ap.add_argument("--no-contexts", action="store_true",
                     help="关闭 L3 引文语境层（v3.0.0 默认开：verified 引文拉取 S2 引用语境/学界评价）")
     ap.add_argument("--ncbi-key", default="",
@@ -2411,6 +2535,7 @@ def main() -> int:
 
     mark_duplicates(results)
     apply_semantic_cap(results)  # v1.11：语义否定判定封顶（在去重后统一执行）
+    apply_l4_cascade(results, args.timeout)  # v3.1：L4 证据升级级联（--judge-url 时激活；零配置零变化）
     scorecard = compute_scorecard(results)
     content = (render_html(results, args.offline, args.profile) if args.format == "html"
                else render_md(results, args.offline, args.profile))

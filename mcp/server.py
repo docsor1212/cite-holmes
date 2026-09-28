@@ -165,7 +165,8 @@ if _MCP_OK:
                 "v1.13 task-language description; v2.0 MCP three-primitives + arXiv "
                 "version note + NCBI key + evidence chain; v3.0 BLUF dual-reader "
                 "reports + scholarly contexts; v3.1 L4 cascade wired into the main "
-                "flow + thinking-model-proof judge client. Current: " + vr.VERSION)
+                "flow + thinking-model-proof judge client; v3.2 BLUF spec conformance "
+                "(JSON object) + offline retraction cache. Current: " + vr.VERSION)
 
     @mcp.prompt
     def fact_check_workflow(topic: str) -> str:

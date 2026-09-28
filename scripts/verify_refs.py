@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.1.0"
+VERSION = "3.2.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -224,9 +224,10 @@ SCORE_WEIGHTS = {"verified": 10, "partial": 4, "unreachable": 0,
                  "unverified": -2, "invalid": -8}
 
 
-def render_bluf(results: list, scorecard: dict) -> str:
-    """v3.0.0 BLUF 双读者前置块（业界空白,cite-holmes 定义）：人类 3 秒 + AI 可直接解析。
-    YAML 头: verdict/key_numbers/blocker/next_action；正文首屏 5 行 TL;DR。"""
+def render_bluf_dict(results: list, scorecard: dict) -> dict:
+    """v3.2.0 BLUF 结构化块(BLUF Report Specification v1.0 L1):
+    五键字典 + typed 附加(score/counts)——JSON 报告 bluf 字段直接用它。
+    worst-actionable 规则(规范第 4 节):invalid>未验>partial 分支措辞。"""
     c = scorecard["counts"]
     n = scorecard["total"]
     if c["invalid"]:
@@ -245,15 +246,25 @@ def render_bluf(results: list, scorecard: dict) -> str:
         verdict = f"全部 verified（{n} 条）——可进入投稿/正文流程"
         blocker = "无"
         action = "可直接 --export bibtex 导出参考文献"
-    y = ("---\n"
-         f"verdict: {verdict}\n"
-         f"key_numbers: CiteScore {scorecard['score']}/100 ({scorecard['grade']}), "
-         f"verified {c['verified']}/{n}, invalid {c['invalid']}, 撤稿/复核 {sum(1 for r in results if r.get('needs_human_check'))}\n"
-         f"blocker: {blocker}\n"
-         f"next_action: {action}\n"
-         f"cite_holmes_version: {VERSION}\n"
-         "---")
-    return y
+    kn = (f"CiteScore {scorecard['score']}/100 ({scorecard['grade']}), "
+          f"verified {c['verified']}/{n}, invalid {c['invalid']}, "
+          f"撤稿/复核 {sum(1 for r in results if r.get('needs_human_check'))}")
+    return {"verdict": verdict, "key_numbers": kn, "blocker": blocker,
+            "next_action": action, "cite_holmes_version": VERSION,
+            "score": scorecard["score"], "grade": scorecard["grade"],
+            "counts": dict(c)}
+
+
+def render_bluf(results: list, scorecard: dict) -> str:
+    """v3.0.0 YAML 前置块(md/html 用);v3.2.0 起从 render_bluf_dict 单一真源渲染。"""
+    d = render_bluf_dict(results, scorecard)
+    return ("---\n"
+            f"verdict: {d['verdict']}\n"
+            f"key_numbers: {d['key_numbers']}\n"
+            f"blocker: {d['blocker']}\n"
+            f"next_action: {d['next_action']}\n"
+            f"cite_holmes_version: {d['cite_holmes_version']}\n"
+            "---")
 
 
 def compute_scorecard(results: list) -> dict:
@@ -967,10 +978,37 @@ def check_url(url: str, timeout: float, retries: int = 1) -> tuple:
 FIELD_ZH = {"title": "标题(title)", "url": "链接(url)", "source": "来源(source)", "year": "年份(year)"}
 
 
+_RETRACTION_CACHE = [None]  # 惰性加载:--retraction-cache 指向 JSON 索引
+# {doi_lower: {"date","type","reason"}}(Crossref GitLab 官方 dump 构建,63k+ 条)
+
+
+def _retraction_local(doi: str):
+    """v3.2.0 本地撤稿缓存命中查询(零网络)。未配置/未命中返回 None。"""
+    path = _OPTS.get("retraction_cache") or ""
+    if not path:
+        return None
+    if _RETRACTION_CACHE[0] is None:
+        try:
+            with open(os.path.expanduser(path), encoding="utf-8") as f:
+                _RETRACTION_CACHE[0] = json.load(f) or {}
+        except Exception:
+            _RETRACTION_CACHE[0] = {}  # 坏文件=视为空缓存,不炸主流程
+    return _RETRACTION_CACHE[0].get(doi.strip().lower())
+
+
 def crossref_retraction_check(doi: str, timeout: float) -> tuple:
     """v1.8 撤稿检测：Crossref REST API（Retraction Watch 数据，免费/每日更新）。
+    v3.2.0：--retraction-cache 配置本地索引(GitLab 官方 dump 构建)时先查本地
+    (零网络/离线可用),未命中再走网络拿最新状态。
     判定：works 记录的 updated-by 列表中存在 type=="retraction" → 已撤稿。
     查询失败一律静默跳过（绝不因检查失败惩罚引用）。返回 (retracted, note)。"""
+    hit = _retraction_local(doi)
+    if hit is not None:
+        raw_date = (hit.get("date") or "").split(" 0:00")[0]  # CSV 时间残渣剥除
+        when = f"（{raw_date}）" if raw_date else ""
+        nature = hit.get("type") or "Retraction"
+        return True, (f"论文已撤稿（本地 Retraction Watch 索引{when}，{nature}）"
+                      "→ 不得作为有效证据引用")
     mailto = _OPTS.get("mailto") or ""
     url = f"https://api.crossref.org/works/{quote(doi, safe='()/')}"
     if mailto:
@@ -2354,6 +2392,9 @@ def main() -> int:
                          "也可用环境变量 NCBI_API_KEY）")
     ap.add_argument("--s2-key", default="",
                     help="Semantic Scholar API key（免钥为共享限速池；也可用环境变量 S2_API_KEY）")
+    ap.add_argument("--retraction-cache", default="",
+                    help="撤稿本地缓存 JSON 索引（Crossref GitLab dump 构建,63k+ DOI;"
+                         "命中零网络,离线可用;未配置走 Crossref 在线查询）")
     ap.add_argument("--mailto", default="",
                     help="联系邮箱：进入 Crossref polite pool（限速更宽松），机构/CI 用户建议配置")
     ap.add_argument("--workers", type=int, default=4,
@@ -2386,6 +2427,7 @@ def main() -> int:
         "openalex_key": args.openalex_key or os.environ.get("OPENALEX_API_KEY", ""),
         "s2_key": args.s2_key or os.environ.get("S2_API_KEY", ""),
         "ncbi_key": args.ncbi_key or os.environ.get("NCBI_API_KEY", ""),
+        "retraction_cache": args.retraction_cache.strip(),
         "mailto": args.mailto.strip(),
         "contexts": not args.no_contexts,
         "judge_url": args.judge_url.strip(),
@@ -2544,7 +2586,8 @@ def main() -> int:
     json_path = args.json_out or (args.out.rsplit(".", 1)[0] + ".json")
     with open(json_path, "w", encoding="utf-8") as f:
         json.dump({"version": VERSION, "profile": args.profile, "offline": args.offline,
-                   "bluf": render_bluf(results, scorecard),
+                   "bluf": render_bluf_dict(results, scorecard),  # v3.2.0 规范 L1:对象
+                   "bluf_yaml": render_bluf(results, scorecard),  # 兼容:YAML 文本
                    "scorecard": scorecard, "results": results},
                   f, ensure_ascii=False, indent=2)
     print(f"CiteScore: {scorecard['score']}/100 ({scorecard['grade']} 级，{scorecard['total']} 条)")

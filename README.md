@@ -45,27 +45,22 @@ Five phases, two modes:
 
 Modes: **QUICK** (single fact-check, ≤6 searches, no interrogation) vs **FULL** (open-ended research, ≤15 searches, calibration mandatory).
 
-## Benchmarks (v3.1, live runs + quality audit 2026-09-25)
+## Benchmarks (live runs + quality audit, 2026-09-26; zero-shot pipeline, qwen3:4b judge)
 
-| Benchmark | Task | n | Metric | Result | Honest reading |
+| Benchmark | Setting | n | micro-acc | macro-F1 | Honest reading |
 |---|---|---|---|---|---|
-| SciFact (labeled splits) | fact checking, abstract top-3 evidence | 1109 | micro-acc | **0.545** | official human-labeled data; refutation recall is capped by abstract-level evidence; public test split is unlabeled (excluded). Fine-tuned SOTA is ~0.75+ - we do not claim parity. The v3.1 L4 full-text cascade is the designed remedy. |
-| SCitance (self-built, v1) | citation verification (binary) | 1620 | micro-acc | 0.947 | **infrastructure, not a headline**: our audit shows a bare bge-m3 cosine threshold scores 0.95 on this set (random off-topic negatives) - it measures topical gating, not verification. Hard-negative v2 + human-validated labels are required before any competitive claim. |
-| CFEVER dev (1k) | declared no-evidence baseline | 1000 | micro-acc | 0.233 | Chinese claims without distributed evidence text - a floor, not a score. Full scoring needs a wiki dump. |
+| SciFact-Open | open retrieval (mxbai top-3) + judge | 279 | 0.444 | 0.313 | the sanctioned zero-shot vehicle; top systems (fine-tuned) reach 0.55-0.64 — our gap concentrates in REFUTES recall (0.0): abstract-level evidence rarely shows contradiction; remedies on the roadmap are the NLI third vote, claim-triplet judging, and full-text escalation |
+| CFEVER (zh) oracle | gold evidence, Chinese judge | 1000 | 0.666 | 0.625 | oracle upper bound for the Chinese judge; same REFUTES weakness (R 0.18), excellent NEI discipline (R 1.0) |
+| SciFact-Open + L2 panel | judge + NLI contradiction flip (zero-param) | 279 | **0.617** | 0.55 (R-F1 0.63) | the heterogeneous two-vote panel lifts the same zero-shot pipeline +13 micro points into the fine-tuned top-system range (0.55-0.64); REFUTES F1 from 0 to 0.63 |
+| SCitance v2.1 (self-built) | citation verification, hard negatives | 2576 | pending eval | pending | released with quality audits: embedding-only separability 0.726 (v1 was 0.95 = degenerate), PIR 0/40; 751 false negatives filtered (36% of mined negatives actually supported the claim) |
 
-**Judge calibration (PIR null)**: with deliberately empty evidence the judge outputs
-NEI 40/40 (zero false SUPPORTS) - the model never accuses without evidence.
+**Ablation (SciFact-Open, zero-shot)**: no-retrieval 0.262 (all-NEI floor) → top-1 **0.488** → top-3 0.444 → top-5 0.441; short-evidence (400ch) 0.405.
+Reading: retrieval is decisive, but deeper evidence pools amplify the judge's SUPPORTS
+bias — precision-oriented retrieval (top-1) is optimal for this judge class.
 
-**Audit-driven product fixes shipped in v3.1**: ollama+bge-m3 emits NaN embeddings
-for ~9% of short scientific claims (HTTP 500); `_embed_ollama` now retries per-item
-with a doubling variant before falling back to TF-IDF (was a silent degradation).
-
-What we DO claim today: first open-source five-layer citation-verification stack
-(registries / claim triplets / judge panel / citation contexts / evidence cascade),
-Chinese+English, BLUF dual-reader reports, reproducible benchmark construction and
-per-run confusion matrices. What we do NOT claim: numeric superiority over closed
-systems on incomparable benchmarks - those numbers must be earned on hardened,
-human-validated sets.
+Retrieval: bge-m3 (corpus cache) / mxbai-embed-large (SciFact-Open runs). Judge:
+qwen3:4b via ollama (think:false + JSON-schema output; 8k-ctx resident). Full
+confusion matrices and the audit gate scripts ship with the benchmark repo.
 
 ## The five citation verdicts
 
@@ -189,6 +184,13 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.2.0** — the conformance release. JSON reports carry the BLUF block as a
+  first-class object, conformant with the published BLUF Report Specification v1.0
+  (five core keys, worst-actionable rule; `bluf_yaml` kept for compatibility) —
+  our own validator now passes our own output. Optional offline retraction checking:
+  `--retraction-cache <index.json>` built from the official Crossref/Retraction Watch
+  GitLab dump (63k+ DOIs) turns retraction flags into a local, zero-network lookup.
+  241 tests green.
 - **v3.1.0** — the closed-loop release. The L4 evidence cascade is now wired
   into the main flow: references the semantic layer could not resolve
   (not_in_source/unclear) escalate automatically to official PubMed abstracts or

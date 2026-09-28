@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 3.1.0
+version: 3.2.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -148,7 +148,7 @@ a configurable external judge (OpenAI-compatible /v1 or native ollama with
 thinking-mode handling) — judge findings are recorded as notes and never flip
 verdicts (conservative by design; zero network calls without --judge-url). Optional `NCBI_API_KEY`
 raises E-utilities throughput from 3 to 10 req/s for parallel batches.
-Repeat runs reuse prior verdicts from a local disk cache (default on, 7-day TTL,
+Retracted papers are flagged via Crossref online, or instantly and offline via an optional local Retraction Watch index (`--retraction-cache`, built from the official Crossref GitLab dump, 63k+ DOIs). JSON reports now carry the BLUF block as a first-class object (conformant with the published BLUF Report Specification v1.0; the YAML text is kept as `bluf_yaml` for compatibility). Repeat runs reuse prior verdicts from a local disk cache (default on, 7-day TTL,
 `~/.cache/cite-holmes/`; `--no-cache` / `--refresh-cache` / `--cache-ttl` to
 tune; `--strict` always bypasses it). Behind a firewall? Pass `--proxy
 http://host:port` (or set `HTTPS_PROXY`) — one honest fast pass beats minutes

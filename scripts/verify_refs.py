@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.2.0"
+VERSION = "3.3.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -652,17 +652,27 @@ def pmid_doi_crosscheck(pmid: str, doi: str, timeout: float) -> tuple:
     if _cb_open(u):
         return "", _cb_skip_note(u) + "，DOI↔PMID 交叉未做"
     _ncbi_rate_wait()
-    try:
-        req = urllib.request.Request(
-            u, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            j = json.loads(resp.read().decode("utf-8", "ignore"))
-    except urllib.error.HTTPError as e:
-        _cb_record(u, False)
-        return "", f"E-utilities 交叉查询失败（HTTP {e.code}），跳过 DOI↔PMID 交叉"
-    except Exception as e:
-        _cb_record(u, True)
-        return "", f"E-utilities 交叉查询失败（{type(e).__name__}），跳过 DOI↔PMID 交叉"
+    # v3.3.0 评审修复(09-29 ④b 实证):URLError/超时无重试会被网络抖动一击必杀
+    # → 3 次递增退避重试(与 T3a DOI 探测同标准);HTTPError 服务器已应答不重试
+    j = None
+    last_exc = None
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(
+                u, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                j = json.loads(resp.read().decode("utf-8", "ignore"))
+            break
+        except urllib.error.HTTPError as e:
+            _cb_record(u, False)
+            return "", f"E-utilities 交叉查询失败（HTTP {e.code}），跳过 DOI↔PMID 交叉"
+        except Exception as e:
+            _cb_record(u, True)
+            last_exc = e
+            time.sleep(1.5 * (attempt + 1))
+    if j is None:
+        return "", (f"E-utilities 交叉查询失败（{type(last_exc).__name__}×3 重试后仍失败），"
+                    "跳过 DOI↔PMID 交叉")
     _cb_record(u, False)
     res = j.get("result") or {}
     item = res.get(str(pmid)) or {}
@@ -1713,10 +1723,19 @@ def apply_l4_cascade(results: list, timeout: float) -> None:
             jd = judge_claim_via_endpoint(claim, "\n\n".join(hits), timeout=timeout)
             rec = {"trigger": sa.get("support"), "evidence_source": src_name,
                    "top_chunk_chars": len(hits[0]), "judge_verdict": jd.get("verdict")}
+            if _OPTS.get("nli_url"):
+                no = nli_vote("\n\n".join(hits), claim, timeout=timeout)
+                agg = aggregate_l2(jd.get("verdict") or "NEI", no)
+                rec["nli"] = agg["nli"]
+                rec["l2_confidence"] = agg["confidence"]
             if jd.get("degraded"):
                 rec["degraded"] = jd["degraded"]
             chk["l4_evidence_cascade"] = rec
             add = lambda s: r.update({"note": ((r.get("note") + "；") if r.get("note") else "") + s})
+            if rec.get("l2_confidence") == "contested":
+                r["needs_human_check"] = True
+                add(f"L2 分歧：裁判判 {jd.get('verdict')} 而 NLI 第三票判 {rec.get('nli')}"
+                    "→ 标记人工复核（不自动翻案）")
             if jd.get("verdict") == "SUPPORTS":
                 add("L4 升级：官方文本段落级证据经外置裁判判定支持（语义封顶维持，供人工复核参考）")
             elif jd.get("verdict") == "CONTRADICTS":
@@ -1891,6 +1910,39 @@ def retrieve_evidence(query: str, fulltext: str, k: int = 2) -> list:
         top = sorted(range(len(chunks)), key=lambda i: -scores[i])[:k]
         return [chunks[i] for i in top]
     return [chunks[i] for i in _tfidf_top(query, chunks, k)]
+
+
+def nli_vote(premise: str, hypothesis: str, timeout: float = 30) -> dict:
+    """v3.3.0 L2 NLI 第三票(独立 HTTP 服务,nli_service.py 形态)。失败/未配置返回
+    {"label": None}——聚合层按弃权处理,绝不影响主流程。"""
+    url = _OPTS.get("nli_url") or ""
+    if not url:
+        return {"label": None}
+    try:
+        body = json.dumps({"premise": (premise or "")[:6000],
+                           "hypothesis": (hypothesis or "")[:1000]}).encode()
+        req = urllib.request.Request(url.rstrip("/") + "/api/nli", data=body,
+                                     headers={"Content-Type": "application/json"})
+        with urllib.request.urlopen(req, timeout=timeout) as r:
+            return json.loads(r.read().decode("utf-8", "ignore"))
+    except Exception:
+        return {"label": None}
+
+
+_NLI_MAP = {"entailment": "SUPPORTS", "contradiction": "CONTRADICTS",
+            "neutral": "NEI"}
+
+
+def aggregate_l2(gen_verdict: str, nli_out: dict) -> dict:
+    """生成式裁判 + NLI 第三票 → 聚合(实验验证:REFUTES F1 0→0.63)。
+    产品哲学:聚合结论只用于注记/复核标记——contested 必须 needs_human_check,
+    绝不自动翻转机械层判定(与 L4 保守策略一致)。"""
+    nv = _NLI_MAP.get((nli_out or {}).get("label") or "")
+    if nv is None or (nli_out or {}).get("abstain"):
+        return {"confidence": "single", "nli": "abstained"}
+    if nv == gen_verdict:
+        return {"confidence": "high", "nli": nv}
+    return {"confidence": "contested", "nli": nv}
 
 
 def judge_endpoint_available() -> bool:
@@ -2392,6 +2444,8 @@ def main() -> int:
                          "也可用环境变量 NCBI_API_KEY）")
     ap.add_argument("--s2-key", default="",
                     help="Semantic Scholar API key（免钥为共享限速池；也可用环境变量 S2_API_KEY）")
+    ap.add_argument("--nli-url", default="",
+                    help="L2 NLI 第三票服务(nli_service.py;弃权式,分歧标人工复核不翻案)")
     ap.add_argument("--retraction-cache", default="",
                     help="撤稿本地缓存 JSON 索引（Crossref GitLab dump 构建,63k+ DOI;"
                          "命中零网络,离线可用;未配置走 Crossref 在线查询）")
@@ -2428,6 +2482,7 @@ def main() -> int:
         "s2_key": args.s2_key or os.environ.get("S2_API_KEY", ""),
         "ncbi_key": args.ncbi_key or os.environ.get("NCBI_API_KEY", ""),
         "retraction_cache": args.retraction_cache.strip(),
+        "nli_url": args.nli_url.strip(),
         "mailto": args.mailto.strip(),
         "contexts": not args.no_contexts,
         "judge_url": args.judge_url.strip(),

@@ -50,9 +50,9 @@ Modes: **QUICK** (single fact-check, ≤6 searches, no interrogation) vs **FULL*
 | Benchmark | Setting | n | micro-acc | macro-F1 | Honest reading |
 |---|---|---|---|---|---|
 | SciFact-Open | open retrieval (mxbai top-3) + judge | 279 | 0.444 | 0.313 | the sanctioned zero-shot vehicle; top systems (fine-tuned) reach 0.55-0.64 — our gap concentrates in REFUTES recall (0.0): abstract-level evidence rarely shows contradiction; remedies on the roadmap are the NLI third vote, claim-triplet judging, and full-text escalation |
-| CFEVER (zh) oracle | gold evidence, Chinese judge | 1000 | 0.666 | 0.625 | oracle upper bound for the Chinese judge; same REFUTES weakness (R 0.18), excellent NEI discipline (R 1.0) |
+| CFEVER (zh) oracle + panel | gold evidence, zh judge + Erlangshen flip | 1000 | **0.817** | — | panel +8.1 over the 0.736 solo run; REFUTES correct 71→248 | oracle upper bound for the Chinese judge; same REFUTES weakness (R 0.18), excellent NEI discipline (R 1.0) |
 | SciFact-Open + L2 panel | judge + NLI contradiction flip (zero-param) | 279 | **0.617** | 0.55 (R-F1 0.63) | the heterogeneous two-vote panel lifts the same zero-shot pipeline +13 micro points into the fine-tuned top-system range (0.55-0.64); REFUTES F1 from 0 to 0.63 |
-| SCitance v2.1 (self-built) | citation verification, hard negatives | 2576 | pending eval | pending | released with quality audits: embedding-only separability 0.726 (v1 was 0.95 = degenerate), PIR 0/40; 751 false negatives filtered (36% of mined negatives actually supported the claim) |
+| SCitance v2.1 (self-built) | citation verification, hard negatives | 2576 | **0.713** (judge solo) / 0.646 (with NLI flip) | — | honest successor of the deprecated v1 0.947; the NLI contradiction flip that helps fact-check framing (+13 on SciFact-Open) HURTS here (-7) — topically-close hard negatives make the NLI over-report contradiction; aggregation is task-dependent, so the product exposes the panel as opt-in | released with quality audits: embedding-only separability 0.726 (v1 was 0.95 = degenerate), PIR 0/40; 751 false negatives filtered (36% of mined negatives actually supported the claim) |
 
 **Ablation (SciFact-Open, zero-shot)**: no-retrieval 0.262 (all-NEI floor) → top-1 **0.488** → top-3 0.444 → top-5 0.441; short-evidence (400ch) 0.405.
 Reading: retrieval is decisive, but deeper evidence pools amplify the judge's SUPPORTS
@@ -184,6 +184,12 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.3.0** — the heterogeneous-panel release. Optional NLI third vote
+  (`--nli-url`): an independent NLI service watches the generative judge;
+  agreement records high confidence, disagreement marks human review without
+  flipping mechanical verdicts (conservative philosophy, mirroring L4).
+  Experimentally validated: the same panel lifts SciFact-Open zero-shot micro
+  from 0.484 to 0.617 with REFUTES F1 0-to-0.63. 252 tests green.
 - **v3.2.0** — the conformance release. JSON reports carry the BLUF block as a
   first-class object, conformant with the published BLUF Report Specification v1.0
   (five core keys, worst-actionable rule; `bluf_yaml` kept for compatibility) —

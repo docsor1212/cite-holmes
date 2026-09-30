@@ -184,6 +184,10 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.3.1** — title cleaning for metadata matching: reference lines are cleaned
+  (strip numbering, DOI/PMID/arXiv suffixes, author+year blocks) before title
+  similarity is computed against official registry metadata — demo-validated to
+  raise AlphaFold-style matches from 0.66 to 0.9+.
 - **v3.3.0** — the heterogeneous-panel release. Optional NLI third vote
   (`--nli-url`): an independent NLI service watches the generative judge;
   agreement records high confidence, disagreement marks human review without

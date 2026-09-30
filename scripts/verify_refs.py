@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.3.0"
+VERSION = "3.3.1"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -479,7 +479,7 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
               f"Mozilla/5.0 (compatible; cite-holmes/{VERSION}; +verified-deep-research)"]
     meta, fetch_err = None, ""
     retry_after = 0.0
-    for attempt in range(2):
+    for attempt in range(3):
         req = urllib.request.Request(
             req_url, headers={
                 "Accept": "application/vnd.citationstyles.csl+json",
@@ -505,8 +505,9 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
                     pass
         except Exception as e:
             fetch_err = type(e).__name__
-        if attempt == 0:
-            time.sleep(retry_after if retry_after else 1.2)  # 瞬态抖动/限流稍候重试
+        if attempt < 2:
+            # T3a 家族第 5 变体修复(09-30 ④b 实证):慢窗下 2 连发全灭→3 连发递增退避
+            time.sleep(retry_after if retry_after else (1.2 if attempt == 0 else 3.5))
     if meta is None:
         _cb_record(cb_url, True)  # 整次调用只记 1 次传输失败（重试是同一逻辑失败）
         return "", f"DOI 元数据获取失败（{fetch_err}），跳过内容核验", False
@@ -1473,7 +1474,7 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
         s2_matched = False
         if out["doi"] and DOI_RE.match(out["doi"]):
             doi_adj, note, doi_matched = doi_metadata_match(
-                out["doi"], str(ref.get("title") or ""), ref.get("year"), timeout,
+                out["doi"], clean_title(str(ref.get("title") or "")), ref.get("year"), timeout,
                 str(ref.get("source") or ""),
                 str(ref.get("authors") or ""))
             out["checks"]["doi_metadata"] = {"matched": doi_matched, "adjust": doi_adj}
@@ -1486,7 +1487,7 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
             # 的第二路正面确认——只确认不降级（S2 记录质量参差，不一致静默）
             if not doi_matched:
                 s2_matched, s2note = s2_doi_confirm(
-                    out["doi"], str(ref.get("title") or ""), timeout)
+                    out["doi"], clean_title(str(ref.get("title") or "")), timeout)
                 out["checks"]["s2"] = {"matched": s2_matched}
                 if s2note:
                     out["note"] = (out["note"] + "；" if out["note"] else "") + s2note
@@ -1500,7 +1501,7 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
         # 同样先于可达性检查，避免假 ID 被误判为 unreachable（v1.5）
         elif out["arxiv"]:
             arxiv_adj, note, arxiv_matched = arxiv_metadata_match(
-                out["arxiv"], str(ref.get("title") or ""), ref.get("year"), timeout)
+                out["arxiv"], clean_title(str(ref.get("title") or "")), ref.get("year"), timeout)
             out["checks"]["arxiv_metadata"] = {"matched": arxiv_matched, "adjust": arxiv_adj}
             if note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + note
@@ -1577,7 +1578,7 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
             out["checks"]["openalex"] = {"ran": True, "confirmed": "确认存在" in oa_note}
             if oa_note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + oa_note
-            s2t_matched, s2t_note = s2_title_confirm(str(ref.get("title") or ""), timeout)
+            s2t_matched, s2t_note = s2_title_confirm(clean_title(str(ref.get("title") or "")), timeout)
             out["checks"]["s2_title"] = {"matched": s2t_matched}
             if s2t_note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + s2t_note
@@ -1749,6 +1750,17 @@ def apply_l4_cascade(results: list, timeout: float) -> None:
                     "degraded": f"cascade-error:{type(e).__name__}"}
             except Exception:
                 pass
+
+
+def clean_title(line: str) -> str:
+    """v3.3.1 标题清洗(demo 原型移植):剥序号前缀/ID 后缀/作者段——提升
+    DOI/arXiv 元数据匹配的标题相似度(实测 demo 端 AlphaFold 整行 0.66→清洗后 0.9+)。"""
+    t = re.sub(r"^(?:\[\d+\]|\d+[.)])\s*", "", line.strip())
+    t = re.split(r"\s+(?:doi|pmid|arxiv)\s*[:：]", t, flags=re.I)[0]
+    t = re.sub(r"(?:,|\.\s)\s*(?:et al\.?|and\s+[A-Z][a-z]+)[^0-9]{0,40}"
+               r"(?:19|20)\d{2}", "", t, count=1)
+    t = re.sub(r"[.。]\s*(?:19|20)\d{2}.*$", "", t)
+    return t.strip()[:200] or line.strip()[:200]
 
 
 def _cache_key(ref: dict) -> tuple:

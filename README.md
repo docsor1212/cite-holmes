@@ -184,6 +184,13 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.4.0** — PMID metadata verification + identifier-free search: PMID-only
+  references now get full title/journal/year cross-checks against PubMed
+  registry data (NLM abbreviation-aware journal matching; genuine-PMID-fake-paper
+  splice attacks are caught as invalid), references without any identifier go
+  through OpenAlex + Semantic Scholar title search (confirmation -> partial,
+  not-found -> honest unverified for human review, never "fabricated"), and
+  BLUF key_numbers now reports "reviewed N (retracted X)" separately.
 - **v3.3.1** — title cleaning for metadata matching: reference lines are cleaned
   (strip numbering, DOI/PMID/arXiv suffixes, author+year blocks) before title
   similarity is computed against official registry metadata — demo-validated to

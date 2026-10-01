@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.3.1"
+VERSION = "3.4.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -246,9 +246,12 @@ def render_bluf_dict(results: list, scorecard: dict) -> dict:
         verdict = f"全部 verified（{n} 条）——可进入投稿/正文流程"
         blocker = "无"
         action = "可直接 --export bibtex 导出参考文献"
+    _retr = sum(1 for r in results
+                if "撤稿" in str((r.get("checks") or {}).get("retraction") or ""))
+    _rev = sum(1 for r in results if r.get("needs_human_check"))
     kn = (f"CiteScore {scorecard['score']}/100 ({scorecard['grade']}), "
           f"verified {c['verified']}/{n}, invalid {c['invalid']}, "
-          f"撤稿/复核 {sum(1 for r in results if r.get('needs_human_check'))}")
+          f"复核 {_rev} 条（其中撤稿 {_retr} 条）")
     return {"verdict": verdict, "key_numbers": kn, "blocker": blocker,
             "next_action": action, "cite_holmes_version": VERSION,
             "score": scorecard["score"], "grade": scorecard["grade"],
@@ -688,6 +691,147 @@ def pmid_doi_crosscheck(pmid: str, doi: str, timeout: float) -> tuple:
         return "", "DOI↔PMID 交叉一致（两键指向同一论文）"
     return "invalid", (f"DOI 与 PMID 指向不同论文（PMID {pmid} 登记为 {reg}，"
                        f"引用声称 {doi}）→ 拼接伪造特征，疑似编造引用")
+
+
+
+_JOURNAL_ACRO = {
+    # 不透明缩写(不可按词首拆分匹配的 NLM 缩写)→全称;小写无句点
+    "jama": "journal of the american medical association",
+    "pnas": "proceedings of the national academy of sciences",
+    "bmj": "british medical journal",
+    "jco": "journal of clinical oncology",
+    "jnci": "journal of the national cancer institute",
+    "ajr": "american journal of roentgenology",
+    "jid": "journal of investigative dermatology",
+    "jacc": "journal of the american college of cardiology",
+}
+
+
+def _journal_tokens(s: str) -> list:
+    return re.findall(r"[a-z0-9]+|[\u4e00-\u9fff]", str(s).lower())
+
+
+def _journal_acro_expand(name: str) -> str:
+    """不透明缩写展开(双向);其余原样返回。"""
+    k = re.sub(r"[^a-z0-9 ]", "", str(name).lower()).strip()
+    if k in _JOURNAL_ACRO:
+        return _JOURNAL_ACRO[k]
+    return str(name)
+
+
+def _journal_consistent(claimed: str, registry: str) -> bool:
+    """期刊名一致性(宽容口径,与 v1.6 DOI 路径同哲学):
+    ①规范化后互含→一致 ②NLM 式缩写:短名各词按序匹配长名词首(可跳虚词)
+    →一致 ③不透明缩写(JAMA/PNAS 等)经 _JOURNAL_ACRO 展开后再比 ④跨语言跳过。"""
+    c = str(claimed or "").strip().lower()
+    r = str(registry or "").strip().lower()
+    if not c or not r:
+        return True
+    cn, rn = re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", c), re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", r)
+    if not cn or not rn:
+        return True  # 跨语言不可比,跳过
+    if bool(re.search(r"[\u4e00-\u9fff]", c)) != bool(re.search(r"[\u4e00-\u9fff]", r)):
+        return True  # 拉丁 vs CJK:字系不同不可比,跳过(v1.6 同语义)
+    if cn in rn or rn in cn:
+        return True
+    for a, b in ((c, r), (r, c)):
+        ea, eb = _journal_acro_expand(a), _journal_acro_expand(b)
+        if ea != a or eb != b:
+            an, bn = re.sub(r"[^a-z0-9]+", "", ea), re.sub(r"[^a-z0-9]+", "", eb)
+            if an in bn or bn in an:
+                return True
+            ta, tb = _journal_tokens(ea), _journal_tokens(eb)
+            short, long_ = (ta, tb) if len(ta) <= len(tb) else (tb, ta)
+            stop = {"of", "the", "and", "in", "for", "on"}
+            long_content = [w for w in long_ if w not in stop]
+            j, hit = 0, 0
+            ok = True
+            for st in short:
+                if st in stop:
+                    continue
+                while j < len(long_content) and not long_content[j].startswith(st):
+                    j += 1
+                if j >= len(long_content):
+                    ok = False
+                    break
+                hit += 1
+                j += 1
+            if ok and hit >= max(1, len([w for w in short if w not in stop])):
+                return True
+    ct, rt = _journal_tokens(c), _journal_tokens(r)
+    short, long_ = (ct, rt) if len(ct) <= len(rt) else (rt, ct)
+    stop = {"of", "the", "and", "in", "for", "on"}
+    long_content = [w for w in long_ if w not in stop]
+    j, hit, ok = 0, 0, True
+    for st in short:
+        if st in stop:
+            continue
+        while j < len(long_content) and not long_content[j].startswith(st):
+            j += 1
+        if j >= len(long_content):
+            ok = False
+            break
+        hit += 1
+        j += 1
+    return bool(ok and hit >= max(1, len([w for w in short if w not in stop])))
+
+
+def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float) -> tuple:
+    """v3.4 池开发:PMID 元数据核验——堵「真 PMID+假标题/假期刊」拼接洞。
+    此前 PMID-only 引用仅查存在性(pubmed_pmid_exists),esummary 拉回的
+    标题/期刊/年份字段被丢弃:攻击者拿真 PMID 配编造标题即可过 verified。
+    本函数复用同源数据(一次 esummary):标题相似度三档(与 DOI 路径同阈值)
+    +期刊一致性(不透明缩写展开,不符降 partial——期刊改名常见不判 invalid)。
+    返回 (adjust, note, matched),adjust ∈ {"", "partial", "invalid"}。"""
+    import difflib
+    u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+         + _ncbi_qs(f"?db=pubmed&id={pmid}&retmode=json"))
+    if _cb_open(u):
+        return "", _cb_skip_note(u) + "，PMID 元数据核验未做", False
+    _ncbi_rate_wait()
+    j = None
+    last_exc = None
+    for attempt in range(3):
+        try:
+            req = urllib.request.Request(
+                u, headers={"User-Agent": f"cite-holmes/{'3.4'}; +verified-deep-research"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                j = json.loads(resp.read().decode("utf-8", "ignore"))
+            break
+        except urllib.error.HTTPError as e:
+            _cb_record(u, False)
+            return "", f"E-utilities 元数据获取失败（HTTP {e.code}），跳过 PMID 内容核验", False
+        except Exception as e:
+            _cb_record(u, True)
+            last_exc = e
+            time.sleep(1.5 * (attempt + 1))
+    if j is None:
+        return "", (f"E-utilities 元数据获取失败（{type(last_exc).__name__}×3），"
+                    "跳过 PMID 内容核验"), False
+    _cb_record(u, False)
+    res = j.get("result") or {}
+    item = res.get(str(pmid)) or {}
+    if item.get("error") or str(pmid) not in (res.get("uids") or []):
+        return "invalid", "PMID 在 PubMed 不存在（E-utilities 核实）→ 疑似编造引用", False
+    mt = item.get("title") or ""
+    matched = False
+    if title:
+        sim = difflib.SequenceMatcher(None, str(title).strip().lower(),
+                                      re.sub(r"\s+", " ", mt).strip().lower()).ratio()
+        if sim < 0.50:
+            return "invalid", (f"PMID 登记标题相似度仅 {sim:.2f}（登记为《{mt[:60]}》）"
+                               "→ 真 PMID 假标题，疑似拼接伪造"), False
+        if sim < 0.82:
+            return "partial", (f"PMID 登记标题相似度 {sim:.2f}：《{mt[:60]}》，建议人工复核"), False
+        matched = True
+    if source:
+        reg_j = item.get("fulljournalname") or item.get("source") or ""
+        if reg_j and not _journal_consistent(source, reg_j):
+            return "partial", (f"期刊名与 PubMed 登记不符（登记为 {reg_j}，"
+                               "引用声称 " + str(source).strip() + "）——真 PMID 假期刊或改名，"
+                               "降 partial 人工复核"), matched
+    return "", "PMID 元数据核验一致" + (f"：《{mt[:50]}》" if mt else ""), matched
+
 
 
 _ARXIV_LAST = [0.0]
@@ -1449,9 +1593,31 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
             out.update(verdict="invalid",
                        note="arxiv 字段格式无法识别（应为 YYMM.NNNNN 或 category/NNNNNNN）")
         else:
-            out.update(verdict="invalid",
-                       note="缺少 url 且无可解析的 doi/pmid/arxiv" +
-                            ("（pmid 须为 6-9 位数字）" if pmid else ""))
+            # v3.4 外部独测合并(#2):无标识符引用先走标题检索(与 SKILL.md「查无≠编造」
+            # 声明对齐)——确认存在→partial 保留;查无→unverified 转人工(诚实未知),
+            # 不得以「缺标识符」判编造。离线模式维持原 invalid。
+            t_claim = clean_title(str(ref.get("title") or "")).strip()
+            if offline or not t_claim:
+                out.update(verdict="invalid",
+                           note="缺少 url 且无可解析的 doi/pmid/arxiv" +
+                                ("（pmid 须为 6-9 位数字）" if pmid else ""))
+                return out
+            oa_note = openalex_title_check(t_claim, timeout)
+            out["checks"]["openalex"] = {"ran": True,
+                                         "confirmed": "确认存在" in oa_note}
+            s2_matched, s2_note = s2_title_confirm(t_claim, timeout)
+            out["checks"]["s2_title"] = {"matched": s2_matched}
+            if oa_note:
+                out["note"] = (out["note"] + "；" if out["note"] else "") + oa_note
+            if s2_note:
+                out["note"] = (out["note"] + "；" if out["note"] else "") + s2_note
+            if "确认存在" in oa_note:
+                out.update(verdict="partial", needs_human_check=True)
+                return out
+            out.update(verdict="unverified", needs_human_check=True,
+                       note=(out["note"] + "；" if out["note"] else "") +
+                            "无标识符且两库标题检索未确认——未知状态转人工，不作编造判定")
+            return out
         return out
     if not re.match(r"^https?://", url, re.IGNORECASE):
         out.update(verdict="invalid", note=f"url 非 http(s) 格式: {url[:60]}")
@@ -1571,6 +1737,21 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
                            note=(out["note"] + "；" if out["note"] else "") + pmid_note)
                 return out
             out["note"] = (out["note"] + "；" if out["note"] else "") + pmid_note
+            # v3.4 池:PMID 元数据核验(标题+期刊一致性)——此前 PMID-only 引用
+            # 仅查存在性,真 PMID+假标题/假期刊拼接可过 verified(评审缺口)
+            if not offline and (str(ref.get("title") or "").strip() or
+                                str(ref.get("source") or "").strip()):
+                padj, pnote, pmatched = pmid_metadata_match(
+                    m.group(1), clean_title(str(ref.get("title") or "")),
+                    str(ref.get("source") or ""), ref.get("year"), timeout)
+                out["checks"]["pmid_metadata"] = {"matched": pmatched, "adjust": padj}
+                if pnote:
+                    out["note"] = (out["note"] + "；" if out["note"] else "") + pnote
+                if padj == "invalid":
+                    out.update(verdict="invalid", needs_human_check=True)
+                    return out
+                if padj == "partial":
+                    out.update(verdict="partial", needs_human_check=True)
         # v1.8 OpenAlex 书目级核查：无 DOI/PMID/arXiv 的引用多一路正面确认信号；
         # v1.10 S2 标题检索为并列第二路（两库收录面不同，互为备份；同样只确认不降级）
         if not out["doi"] and not out["pmid"] and not out["arxiv"]:
@@ -1613,6 +1794,10 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
 
     # v1.4：元数据核验判为 partial 时，verified 降级为 partial
     if (doi_adj == "partial" or arxiv_adj == "partial") and out["verdict"] == "verified":
+        out["verdict"] = "partial"
+    # v3.4 外部独测合并:PMID 元数据 partial 与 DOI/arXiv 同闸——降级不得被终局覆盖
+    if (out.get("checks", {}).get("pmid_metadata", {}) or {}).get("adjust") == "partial" \
+            and out["verdict"] == "verified":
         out["verdict"] = "partial"
     if retracted and out["verdict"] == "verified":
         out["verdict"] = "partial"

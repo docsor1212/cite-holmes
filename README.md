@@ -184,6 +184,12 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.4.1** — dedup fingerprint fix: batch deduplication now keys on
+  identifier + normalized title fingerprint, so two references sharing a
+  URL/DOI/PMID but carrying different titles (the classic stitched-fake
+  variant) are independently verified instead of silently inheriting each
+  other's verdict. Genuine duplicates (same identifier + same title) are
+  still merged with the partial downgrade.
 - **v3.4.0** — PMID metadata verification + identifier-free search: PMID-only
   references now get full title/journal/year cross-checks against PubMed
   registry data (NLM abbreviation-aware journal matching; genuine-PMID-fake-paper

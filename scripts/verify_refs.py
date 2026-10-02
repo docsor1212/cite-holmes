@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.4.0"
+VERSION = "3.4.1"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -2269,17 +2269,25 @@ def _dc_put(path: str, key: str, result: dict) -> None:
         pass  # 缓存写失败绝不影响验证本身
 
 
+def _dup_title_sig(r: dict) -> str:
+    """v3.4 去重指纹:引用行的归一化标题(小写去非字母数字)。
+    同标识符+同标题=真重复;同标识符+不同标题=T2/T7 型拼接变体,须独立判定。"""
+    import re as _re
+    return _re.sub(r"[^a-z0-9]+", "", str(r.get("title") or r.get("claim") or "").lower())[:120]
+
+
 def mark_duplicates(results: list) -> None:
     seen = {}
     kind_zh = {"url": "URL", "doi": "DOI", "pmid": "PMID"}
     for r in results:
+        sig = _dup_title_sig(r)
         keys = []
         if r.get("url"):
-            keys.append(("url", normalize_url(r["url"])))
+            keys.append(("url", normalize_url(r["url"]) + "|" + sig))
         if r.get("doi"):
-            keys.append(("doi", r["doi"].lower()))
+            keys.append(("doi", r["doi"].lower() + "|" + sig))
         if r.get("pmid"):
-            keys.append(("pmid", r["pmid"]))
+            keys.append(("pmid", r["pmid"] + "|" + sig))
         hit = next(((k, seen[v]) for k, v in keys if v in seen), None)
         if hit:
             kind, first = hit

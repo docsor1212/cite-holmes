@@ -43,7 +43,7 @@ class TestCleanTitle(unittest.TestCase):
         self.assertIn("smith", r.lower())
 
     def test_t9_version(self):
-        self.assertEqual(vr.VERSION, "3.4.0")
+        self.assertEqual(vr.VERSION, "3.4.1")
 
 
 if __name__ == "__main__":

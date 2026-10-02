@@ -73,23 +73,30 @@ class TestScorecard(unittest.TestCase):
 
 class TestDedupThreeKey(unittest.TestCase):
     def test_url_doi_pmid_dedup(self):
+        # v3.4 语义:判重键=标识符+归一化标题指纹(同标识+同标题=真重复;
+        # 同标识+不同标题=拼接变体,须独立判定——T2/T7 外部独测场景)
         results = [
-            {"index": 1, "title": "a", "url": "https://x.com/", "doi": "10.1000/a",
+            {"index": 1, "title": "Alpha Paper", "url": "https://x.com/", "doi": "10.1000/a",
              "pmid": "36443570", "verdict": "verified", "note": ""},
-            {"index": 2, "title": "b", "url": "https://x.com", "doi": "", "pmid": "",
-             "verdict": "verified", "note": ""},
-            {"index": 3, "title": "c", "url": "https://y.com", "doi": "10.1000/A",
-             "pmid": "", "verdict": "verified", "note": ""},
-            {"index": 4, "title": "d", "url": "https://z.com", "doi": "",
-             "pmid": "36443570", "verdict": "verified", "note": ""},
+            {"index": 2, "title": "alpha  paper!", "url": "https://x.com", "doi": "", "pmid": "",
+             "verdict": "verified", "note": ""},   # 同URL同标题(归一化后) → 重复
+            {"index": 3, "title": "Alpha Paper", "url": "https://y.com", "doi": "10.1000/A",
+             "pmid": "", "verdict": "verified", "note": ""},   # 同DOI同标题 → 重复
+            {"index": 4, "title": "Alpha Paper", "url": "https://z.com", "doi": "",
+             "pmid": "36443570", "verdict": "verified", "note": ""},   # 同PMID同标题 → 重复
+            {"index": 5, "title": "Beta Paper", "url": "https://x.com", "doi": "", "pmid": "",
+             "verdict": "verified", "note": ""},   # 同URL不同标题 → 独立判定(v3.4)
         ]
         vr.mark_duplicates(results)
         self.assertIn("与 #1 重复（同URL）", results[1]["note"])
         self.assertIn("与 #1 重复（同DOI）", results[2]["note"])
         self.assertIn("与 #1 重复（同PMID）", results[3]["note"])
-        for r in results[1:]:
+        for r in results[1:4]:
             self.assertEqual(r["verdict"], "partial")
         self.assertEqual(results[0]["verdict"], "verified")
+        # 不同标题不吞并:保持独立 verified
+        self.assertNotIn("重复", results[4]["note"])
+        self.assertEqual(results[4]["verdict"], "verified")
 
 
 class TestMissingFields(unittest.TestCase):
@@ -269,7 +276,7 @@ class TestV140(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "r.csv")), "easy 应自动导出 csv")
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "3.4.0")
+        self.assertEqual(vr.VERSION, "3.4.1")
 
 
 class TestHardening(unittest.TestCase):
@@ -1153,7 +1160,7 @@ class TestV170(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "report.json")) is False)
 
     def test_version_bumped_170(self):
-        self.assertEqual(vr.VERSION, "3.4.0")
+        self.assertEqual(vr.VERSION, "3.4.1")
 
 
 class TestV180(unittest.TestCase):
@@ -1378,7 +1385,7 @@ class TestV180(unittest.TestCase):
         self.assertTrue(r["needs_human_check"])
 
     def test_version_bumped_180(self):
-        self.assertEqual(vr.VERSION, "3.4.0")
+        self.assertEqual(vr.VERSION, "3.4.1")
 
 
 class TestV190(unittest.TestCase):
@@ -1434,7 +1441,7 @@ class TestV190(unittest.TestCase):
     # ---------- S2 第三源交叉确认 ----------
 
     def test_version_bumped_190(self):
-        self.assertEqual(vr.VERSION, "3.4.0")
+        self.assertEqual(vr.VERSION, "3.4.1")
 
     def test_s2_confirms_and_rescues_403_landing(self):
         # DOI.org 元数据获取失败（传输错误×2）→ S2 确认存在 → 着陆页 403 救回 verified

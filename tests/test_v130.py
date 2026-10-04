@@ -23,7 +23,7 @@ class TestV130(unittest.TestCase):
         vr._net_reset()
 
     def test_version_is_130(self):
-        self.assertEqual(vr.VERSION, "3.4.1")
+        self.assertEqual(vr.VERSION, "3.5.0")
 
     def test_en_description_contains_all_task_roots(self):
         s = open(SKILL, encoding="utf-8").read()

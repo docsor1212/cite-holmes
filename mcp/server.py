@@ -16,12 +16,21 @@
 - 语义层(来源是否支撑论断)不在机械工具范围,由 agent 自行判定后可用
   semantic 字段回灌 CLI 做封顶。
 """
+import argparse
 import json
 import os
 import sys
 
 _HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(os.path.dirname(_HERE), "scripts"))
+
+# 引擎定位:优先包内嵌入式副本(uvx/git 分发形态,mcp/verify_refs.py,由发布链
+# 从 trunk scripts/verify_refs.py 同步并校验 sha);回退 trunk 布局(开发形态,
+# ../scripts/verify_refs.py)。两条路径互为镜像——一致性门禁见 mcp/sync_engine.sh。
+for _cand in (_HERE, os.path.join(os.path.dirname(_HERE), "scripts")):
+    if os.path.isfile(os.path.join(_cand, "verify_refs.py")):
+        if _cand not in sys.path:
+            sys.path.insert(0, _cand)
+        break
 
 import verify_refs as vr  # noqa: E402
 
@@ -31,6 +40,20 @@ try:
 except ImportError:  # pragma: no cover - 无 fastmcp 环境下仅使用 impl
     _MCP_OK = False
 
+MAX_CLAIMS = 50          # G5:批量上限——agent 传 500 条会打爆单次会话
+_CLIP_STR = 800          # G5:标量字段截断长度
+
+
+def _clip(obj, limit=_CLIP_STR):
+    """递归截断结果中的长字符串(防超大输出撑爆 MCP 消息;结构保持不变)。"""
+    if isinstance(obj, str):
+        return obj if len(obj) <= limit else obj[:limit] + f"…[+{len(obj) - limit} chars]"
+    if isinstance(obj, list):
+        return [_clip(x, limit) for x in obj]
+    if isinstance(obj, dict):
+        return {k: _clip(v, limit) for k, v in obj.items()}
+    return obj
+
 
 def verify_references_impl(claims: list, timeout: float = 15.0) -> dict:
     """机械验证一组引用(纯实现,无 MCP 依赖)。
@@ -38,10 +61,14 @@ def verify_references_impl(claims: list, timeout: float = 15.0) -> dict:
     claims: [{"title": str, "url"?: str, "doi"?: str, "pmid"?: str,
               "arxiv"?: str, "source"?: str, "year"?: int}, ...]
     返回: {"version", "scorecard": {score, grade, counts}, "results": [...]}
+    边界: 批量上限 MAX_CLAIMS(50);输出长字段截断(_CLIP_STR)。
     """
     if not isinstance(claims, list) or not claims:
         return {"error": "claims must be a non-empty array of reference objects",
                 "hint": 'e.g. [{"title": "...", "doi": "10.xxxx/..."}]'}
+    if len(claims) > MAX_CLAIMS:
+        return {"error": f"claims batch too large: {len(claims)} > {MAX_CLAIMS}",
+                "hint": "分批调用(每批 ≤50),或先用检索侧收敛候选清单"}
     vr._net_reset()
     results = []
     for i, ref in enumerate(claims, 1):
@@ -59,7 +86,7 @@ def verify_references_impl(claims: list, timeout: float = 15.0) -> dict:
     vr.mark_duplicates(results)
     vr.apply_semantic_cap(results)
     sc = vr.compute_scorecard(results)
-    return {"version": vr.VERSION, "scorecard": sc, "results": results}
+    return _clip({"version": vr.VERSION, "scorecard": sc, "results": results})
 
 
 def explain_verdict_impl(result: dict) -> dict:
@@ -184,8 +211,30 @@ if _MCP_OK:
             "unverified reference in the final text.")
 
 
-if __name__ == "__main__":
+def main(argv=None):
+    """CLI 入口([project.scripts] cite-holmes-mcp):stdio 默认,可选 http。
+
+    uvx --from "git+https://github.com/docsor1212/cite-holmes#subdirectory=mcp" \
+        cite-holmes-mcp --help
+    """
+    ap = argparse.ArgumentParser(
+        prog="cite-holmes-mcp",
+        description="cite-holmes MCP server — 机械引用核验(tools/resources/prompts 三原语)")
+    ap.add_argument("--transport", choices=("stdio", "http", "sse"), default="stdio",
+                    help="传输方式(默认 stdio;http 监听 127.0.0.1:8760)")
+    ap.add_argument("--host", default="127.0.0.1", help="http/sse 模式监听地址")
+    ap.add_argument("--port", type=int, default=8760, help="http/sse 模式监听端口")
+    args = ap.parse_args(argv)
     if not _MCP_OK:
-        print("缺少 FastMCP 运行环境：uvx --from \"git+https://github.com/docsor1212/cite-holmes#subdirectory=mcp\" cite-holmes-mcp", file=sys.stderr)
-        sys.exit(1)
-    mcp.run()
+        print('缺少 FastMCP 运行环境：uvx --from "git+https://github.com/'
+              'docsor1212/cite-holmes#subdirectory=mcp" cite-holmes-mcp', file=sys.stderr)
+        return 1
+    if args.transport == "stdio":
+        mcp.run()
+    else:
+        mcp.run(transport=args.transport, host=args.host, port=args.port)
+    return 0
+
+
+if __name__ == "__main__":
+    sys.exit(main())

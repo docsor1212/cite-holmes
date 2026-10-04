@@ -57,7 +57,7 @@ class TestV120(unittest.TestCase):
         return rc, calls, doc
 
     def test_version_bumped_120(self):
-        self.assertEqual(vr.VERSION, "3.4.1")
+        self.assertEqual(vr.VERSION, "3.5.0")
 
     def test_disk_cache_hit_second_run_zero_calls(self):
         refs = [{"title": "A Paper About X", "doi": "10.1000/cache-hit"}]
@@ -218,7 +218,8 @@ class TestV120Guardrails(unittest.TestCase):
     def test_private_tools_absent_from_skill_dir(self):
         # 包净化:私有工具不得回迁 skill 目录(打包按目录树收文件)
         d = os.path.join(HERE, "..", "tools")
-        present = set(os.listdir(d)) if os.path.isdir(d) else set()
+        present = {x for x in (os.listdir(d) if os.path.isdir(d) else [])
+                   if os.path.isfile(os.path.join(d, x))}  # 只统计文件,忽略 __pycache__ 等缓存目录
         self.assertEqual(present, {"agentskills_check.py"},
                          "tools/ 只应保留规范自检脚本")
 

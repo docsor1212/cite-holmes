@@ -95,3 +95,19 @@ fields are picked up automatically).
 not_in_source / contradicted / unclear）。`not_in_source` 与 `contradicted`
 会被机械验证器封顶为 `partial` 并转入人工复核区——来源存在不等于来源认同。
 旧的字符串写法仍接受（仅注记）。
+
+## Q: fast-judge 预筛会改我的判定吗？（v3.5.0）
+不会。`--fast-judge-url` 外挂的 322M 蒸馏分类器只对"语义待定且无官方文本可升级"
+的引用追加「倾向支持（供人工参考）」注记——永不产生/修改五态判定，永不标记人工
+复核，默认关闭。校准曲线随仓库发布（阈值 0.95）。
+
+## Q: GB/T 7714-2025 导出的数据来源是什么？（v3.6.0）
+`--export gbt7714` 仅导出 verified 条目，且每条以**注册库登记的 CSL 元数据**
+为准（作者按国标缩写惯例预格式化、期刊/年/卷期页来自 DOI.org/Crossref 登记），
+不是你手填的字段。无注册元数据的电子资源按 [EB/OL] + 引用日期输出。
+
+## Q: 国内网络直连核验总超时怎么办？（v3.6.0）
+加 `--cn`：超时下限抬到 25 秒，且 DOI.org 三试全败时自动回源
+api.crossref.org（独立主机，同构 CSL 元数据，报告注记会写明「经 Crossref
+回源」）。仍不通时 `--proxy` / `HTTPS_PROXY` 继续兜底；`unreachable` 不等于
+假引用，换网重跑后再下结论。

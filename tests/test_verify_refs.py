@@ -239,7 +239,7 @@ class TestV140(unittest.TestCase):
         real = {"title": ["A landmark study about X"], "issued": {"date-parts": [[2023]]}}
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self._mock_urlopen(real)):
-            adjust, note, matched = vr.doi_metadata_match("10.1000/real", "a landmark study about x", 2023, 5)
+            adjust, note, matched, _csl = vr.doi_metadata_match("10.1000/real", "a landmark study about x", 2023, 5)
         self.assertEqual(adjust, "")
         self.assertTrue(matched)
         self.assertIn("一致", note)
@@ -248,7 +248,7 @@ class TestV140(unittest.TestCase):
         real = {"title": ["A completely different paper about Y"], "issued": {"date-parts": [[2019]]}}
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self._mock_urlopen(real)):
-            adjust, note, matched = vr.doi_metadata_match("10.1000/real", "a landmark study about x", 2023, 5)
+            adjust, note, matched, _csl = vr.doi_metadata_match("10.1000/real", "a landmark study about x", 2023, 5)
         self.assertEqual(adjust, "invalid")
         self.assertTrue(matched)
         self.assertIn("编造或错引", note)
@@ -276,7 +276,7 @@ class TestV140(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "r.csv")), "easy 应自动导出 csv")
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "3.5.0")
+        self.assertEqual(vr.VERSION, "3.6.0")
 
 
 class TestHardening(unittest.TestCase):
@@ -855,7 +855,7 @@ class TestV160(unittest.TestCase):
         vr._CB["https://doi.org"] = {"fails": 2, "open": True}
         m2 = unittest.mock.MagicMock()
         with unittest.mock.patch.object(vr.urllib.request, "urlopen", m2):
-            adj2, note2, _ = vr.doi_metadata_match("10.1000/real", "t", 2024, 5)
+            adj2, note2, _c2, _csl_extra = vr.doi_metadata_match("10.1000/real", "t", 2024, 5)
         m2.assert_not_called()
         self.assertIn("断路器", note2)
 
@@ -877,7 +877,7 @@ class TestV160(unittest.TestCase):
 
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=FakeResp()):
-            adj, note, matched = vr.doi_metadata_match(
+            adj, note, matched, _csl = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5,
                 source="Completely Other Journal")
         self.assertEqual(adj, "partial")
@@ -887,7 +887,7 @@ class TestV160(unittest.TestCase):
         csl["container-title"] = "The Lancet"
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=FakeResp()):
-            adj2, note2, _ = vr.doi_metadata_match(
+            adj2, note2, _c2, _csl_extra = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5, source="Lancet")
         self.assertEqual(adj2, "")
         self.assertNotIn("期刊名不符", note2)
@@ -989,7 +989,7 @@ class TestV160(unittest.TestCase):
 
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=FakeResp()):
-            adj, note, _ = vr.doi_metadata_match(
+            adj, note, _c1, _csl_extra = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5,
                 source="N Engl J Med")
         self.assertEqual(adj, "")
@@ -997,7 +997,7 @@ class TestV160(unittest.TestCase):
         # 真不符依旧要抓
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=FakeResp()):
-            adj2, note2, _ = vr.doi_metadata_match(
+            adj2, note2, _c2, _csl_extra = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5,
                 source="Lancet Neurology")
         self.assertEqual(adj2, "partial")
@@ -1039,7 +1039,7 @@ class TestV170(unittest.TestCase):
                          {"family": "Zhang", "given": "W"}])
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self.FakeResp(json.dumps(csl).encode())):
-            adj, note, _ = vr.doi_metadata_match(
+            adj, note, _c1, _csl_extra = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5,
                 authors="Smith J, Wang L")
         self.assertEqual(adj, "")
@@ -1049,7 +1049,7 @@ class TestV170(unittest.TestCase):
         csl = self._csl([{"family": "MacQueen", "given": "J."}])
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self.FakeResp(json.dumps(csl).encode())):
-            adj, _, _ = vr.doi_metadata_match(
+            adj, _, _, _csl_x = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5,
                 authors="macqueen j")
         self.assertEqual(adj, "")
@@ -1058,7 +1058,7 @@ class TestV170(unittest.TestCase):
         csl = self._csl([{"family": "Smith", "given": "J"}])
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self.FakeResp(json.dumps(csl).encode())):
-            adj, note, _ = vr.doi_metadata_match(
+            adj, note, _c1, _csl_extra = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5,
                 authors="Yan C, Zhao M")
         self.assertEqual(adj, "partial")
@@ -1070,7 +1070,7 @@ class TestV170(unittest.TestCase):
         csl = self._csl([{"family": "Chen", "given": "Liwei"}])
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self.FakeResp(json.dumps(csl).encode())):
-            adj, note, _ = vr.doi_metadata_match(
+            adj, note, _c1, _csl_extra = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5,
                 authors="Torvalds, L.")
         self.assertEqual(adj, "partial")
@@ -1083,7 +1083,7 @@ class TestV170(unittest.TestCase):
         csl = self._csl(authors_csl)
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self.FakeResp(json.dumps(csl).encode())):
-            adj, _, _ = vr.doi_metadata_match(
+            adj, _, _, _csl_x = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5, authors="Wang")
         self.assertEqual(adj, "partial")
 
@@ -1092,7 +1092,7 @@ class TestV170(unittest.TestCase):
         csl = self._csl([{"family": "Wang", "given": "Wu"}])
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self.FakeResp(json.dumps(csl).encode())):
-            adj, _, _ = vr.doi_metadata_match(
+            adj, _, _, _csl_x = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5, authors="王五")
         self.assertEqual(adj, "")
 
@@ -1101,7 +1101,7 @@ class TestV170(unittest.TestCase):
         csl = self._csl([{"family": "Smith", "given": "J"}])
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self.FakeResp(json.dumps(csl).encode())):
-            adj, _, _ = vr.doi_metadata_match(
+            adj, _, _, _csl_x = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5, authors="!!!")
         self.assertEqual(adj, "")
 
@@ -1109,7 +1109,7 @@ class TestV170(unittest.TestCase):
         csl = self._csl()  # 无 author 字段 → 跳过判定
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self.FakeResp(json.dumps(csl).encode())):
-            adj, _, _ = vr.doi_metadata_match(
+            adj, _, _, _csl_x = vr.doi_metadata_match(
                 "10.1000/real", "a real paper about x", 2023, 5,
                 authors="Nobody A")
         self.assertEqual(adj, "")
@@ -1160,7 +1160,7 @@ class TestV170(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "report.json")) is False)
 
     def test_version_bumped_170(self):
-        self.assertEqual(vr.VERSION, "3.5.0")
+        self.assertEqual(vr.VERSION, "3.6.0")
 
 
 class TestV180(unittest.TestCase):
@@ -1345,7 +1345,7 @@ class TestV180(unittest.TestCase):
         vr._ARXIV_LAST[0] = 0.0
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         side_effect=fake_urlopen):
-            adjust, note, matched = vr.doi_metadata_match(
+            adjust, note, matched, _csl = vr.doi_metadata_match(
                 "10.1000/real", "a retracted paper about x", 2020, 5)
         self.assertEqual(adjust, "")
         self.assertTrue(matched)
@@ -1385,7 +1385,7 @@ class TestV180(unittest.TestCase):
         self.assertTrue(r["needs_human_check"])
 
     def test_version_bumped_180(self):
-        self.assertEqual(vr.VERSION, "3.5.0")
+        self.assertEqual(vr.VERSION, "3.6.0")
 
 
 class TestV190(unittest.TestCase):
@@ -1441,7 +1441,7 @@ class TestV190(unittest.TestCase):
     # ---------- S2 第三源交叉确认 ----------
 
     def test_version_bumped_190(self):
-        self.assertEqual(vr.VERSION, "3.5.0")
+        self.assertEqual(vr.VERSION, "3.6.0")
 
     def test_s2_confirms_and_rescues_403_landing(self):
         # DOI.org 元数据获取失败（传输错误×2）→ S2 确认存在 → 着陆页 403 救回 verified
@@ -1765,7 +1765,7 @@ class TestV190(unittest.TestCase):
                                         side_effect=lambda req, timeout=None: seq), \
                 unittest.mock.patch.object(vr.time, "sleep",
                                            lambda s: (slept.append(s), orig_sleep(0))):
-            adj, note, matched = vr.doi_metadata_match(
+            adj, note, matched, _csl = vr.doi_metadata_match(
                 "10.1000/good", "A Verified Paper About Topic X", 2026, 5.0)
         self.assertTrue(matched)
         self.assertEqual(adj, "")

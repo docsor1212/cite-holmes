@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 3.3.0
+version: 3.6.0
 author: DoctorQ Lab
 license: MIT
 description: >-

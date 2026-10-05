@@ -69,7 +69,7 @@ class TestV110(unittest.TestCase):
     # ---------- 版本 ----------
 
     def test_version_bumped_110(self):
-        self.assertEqual(vr.VERSION, "3.5.0")
+        self.assertEqual(vr.VERSION, "3.6.0")
 
     # ---------- 并行验证 ----------
 
@@ -275,7 +275,7 @@ class TestV110(unittest.TestCase):
     def test_degraded_doi_metadata_skips_with_actionable_note(self):
         for h in ("https://h1.example/a", "https://h2.example/a", "https://h3.example/a"):
             vr._cb_record(h, True)
-        adj, note, matched = vr.doi_metadata_match("10.1000/x", "Some Title", 2026, 5.0)
+        adj, note, matched, _csl = vr.doi_metadata_match("10.1000/x", "Some Title", 2026, 5.0)
         self.assertEqual(adj, "")
         self.assertFalse(matched)
         self.assertIn("全局网络降级", note)

@@ -28,7 +28,7 @@ class TestV300(unittest.TestCase):
                          "judge_url": "", "judge_model": "m"})
 
     def test_version_is_300(self):
-        self.assertEqual(vr.VERSION, "3.5.0")
+        self.assertEqual(vr.VERSION, "3.6.0")
 
     # ---- BLUF 双读者前置块 ----
 
@@ -37,7 +37,7 @@ class TestV300(unittest.TestCase):
         md = vr.render_md(rs, False)
         self.assertTrue(md.startswith("---\nverdict:"), "md 必须以 BLUF YAML 开头")
         for k in ("verdict:", "key_numbers:", "blocker:", "next_action:",
-                  "cite_holmes_version: 3.5.0"):
+                  "cite_holmes_version: 3.6.0"):
             self.assertIn(k, md.split("---")[1])
 
     def test_bluf_html_machine_readable(self):
@@ -187,7 +187,7 @@ class TestV300(unittest.TestCase):
             def read(self): return csl
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=Resp()):
-            adj, note, matched = vr.doi_metadata_match(
+            adj, note, matched, _csl = vr.doi_metadata_match(
                 "10.1/x", "托珠单抗治疗幼年特发性关节炎", 2021, 5, "", "")
         self.assertEqual(adj, "partial")
         self.assertIn("跨语言", note)
@@ -202,7 +202,7 @@ class TestV300(unittest.TestCase):
             def read(self): return csl
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=Resp()):
-            adj, note, matched = vr.doi_metadata_match(
+            adj, note, matched, _csl = vr.doi_metadata_match(
                 "10.1/x", "Tocilizumab for sJIA", 2021, 5, "", "")
         self.assertEqual(adj, "invalid")
 

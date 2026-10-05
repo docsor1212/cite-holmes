@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.5.0"
+VERSION = "3.6.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -464,12 +464,15 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
     v1.7 新增：作者名一致性核查（复用 CSL author 列表；声称姓氏至少一个命中
     登记列表即视为一致——拼写/变体从宽；全部不命中才降 partial）。
     瞬态网络错误自动重试一次。主机断路器生效。
-    返回 (adjust, note, matched)：adjust ∈ {"", "partial", "invalid"}；
-    matched=True 表示元数据成功取得且与声称标题一致。"""
+    返回 (adjust, note, matched, csl)：adjust ∈ {"", "partial", "invalid"}；
+    matched=True 表示元数据成功取得且与声称标题一致。csl=注册库权威元数据摘要
+    (v3.6 新增，供 GB/T 7714 导出使用；获取失败为 None)。
+    v3.6 --cn 模式：doi.org 三试全败时回源 api.crossref.org/works/{doi}
+    （独立主机，CN 出口常与 doi.org 不同命运），同 CSL 格式无缝续用。"""
     import difflib
     cb_url = f"https://doi.org/{doi}"
     if _cb_open(cb_url):
-        return "", _cb_skip_note(cb_url) + "，未做 DOI 元数据核验", False
+        return "", _cb_skip_note(cb_url) + "，未做 DOI 元数据核验", False, None
     mailto = _OPTS.get("mailto") or ""
     # doi.org 走 UA 联系方式（不加 query 参数——避免干扰个别 DOI 的解析行为）；
     # api.crossref.org 才用 ?mailto= polite pool 约定
@@ -496,7 +499,7 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
         except urllib.error.HTTPError as e:
             _cb_record(cb_url, False)
             if e.code == 404:
-                return "invalid", "DOI 在 DOI.org 不存在（404）→ 疑似编造引用", False
+                return "invalid", "DOI 在 DOI.org 不存在（404）→ 疑似编造引用", False, None
             fetch_err = f"HTTP {e.code}"
             if e.code == 429:
                 # v1.9：限速分层后的礼貌退避——尊重 Retry-After（封顶 5 秒）
@@ -511,9 +514,21 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
         if attempt < 2:
             # T3a 家族第 5 变体修复(09-30 ④b 实证):慢窗下 2 连发全灭→3 连发递增退避
             time.sleep(retry_after if retry_after else (1.2 if attempt == 0 else 3.5))
+    if meta is None and _OPTS.get("cn_mode"):
+        # v3.6 --cn 回源：api.crossref.org/works/{doi} 返回同构 CSL(message 字段)。
+        # 独立主机不计入 doi.org 断路器；失败静默回原路径。
+        try:
+            cr_url = f"https://api.crossref.org/works/{quote(doi, safe='()/')}"
+            cr_req = urllib.request.Request(cr_url, headers={
+                "User-Agent": ua_contact, "Accept": "application/json"})
+            with urllib.request.urlopen(cr_req, timeout=timeout) as resp:
+                meta = json.loads(resp.read().decode("utf-8", "ignore")).get("message") or {}
+            fetch_err = f"doi.org 失败({fetch_err})→Crossref 回源成功"
+        except Exception as e2:
+            fetch_err += f";Crossref 回源失败({type(e2).__name__})"
     if meta is None:
         _cb_record(cb_url, True)  # 整次调用只记 1 次传输失败（重试是同一逻辑失败）
-        return "", f"DOI 元数据获取失败（{fetch_err}），跳过内容核验", False
+        return "", f"DOI 元数据获取失败（{fetch_err}），跳过内容核验", False, None
     mt = meta.get("title")
     meta_title = (mt[0] if isinstance(mt, list) else mt) or ""
     sim = difflib.SequenceMatcher(None, (title or "").lower(),
@@ -522,6 +537,29 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
     parts = (meta.get("issued") or {}).get("date-parts") or []
     if parts and parts[0]:
         meta_year = parts[0][0]
+    # v3.6:注册库权威元数据摘要(GB/T 7714 导出原料)——作者按 GB/T 缩写惯例
+    # 预格式化(拉丁:姓全大写+名首字母;CJK:全名),container/year/vol/issue/page 原样
+    prov = ("；DOI 元数据经 Crossref 回源（CN 模式）"
+            if "Crossref 回源成功" in fetch_err else "")
+
+    def _gbt_author(a):
+        fam = (a.get("family") or "").strip()
+        giv = (a.get("given") or "").strip()
+        whole = fam + giv
+        if any("\u4e00" <= c <= "\u9fff" for c in whole):
+            return whole
+        ini = " ".join(t[0].upper() for t in re.split(r"[\s\-]+", giv) if t)
+        return (fam.upper() + (" " + ini if ini else "")).strip()
+
+    _ct = meta.get("container-title")
+    _container = (_ct[0] if isinstance(_ct, list) and _ct else _ct) or ""
+    csl = {"title": str(meta_title)[:300],
+           "authors": [x for x in (_gbt_author(a) for a in (meta.get("author") or [])
+                                   if isinstance(a, dict)) if x],
+           "container": str(_container)[:200], "year": meta_year,
+           "volume": str(meta.get("volume") or "")[:32],
+           "issue": str(meta.get("issue") or "")[:32],
+           "page": str(meta.get("page") or "")[:64]}
     # v1.6 期刊名一致性核查（零网络成本）：规范化后互不包含视为不符，
     # 降 partial（期刊改名常见，不判 invalid）。
     # 二轮评审 P1 修正：NLM 式缩写（N Engl J Med vs New England Journal of
@@ -578,17 +616,17 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
                  f"→ 建议核对是否引错论文")
     if not title:
         return (jadj or aadj), (f"DOI 元数据核验完成（引用未提供标题，无法比对；"
-                                f"登记年份 {meta_year or '未知'}）{jnote}{anote}"), True
+                                f"登记年份 {meta_year or '未知'}）{jnote}{anote}"), True, csl
     def _has_cjk(t):
         return any("\u4e00" <= c <= "\u9fff" for c in str(t or ""))
     # v3.0.0 跨语言守卫：中文声称 vs 英文登记（或反之）相似度天然低——
     # 跨语言不可比不判 invalid,降 partial 转人工(与期刊名核查同款守卫)
     if title and sim < 0.50 and (_has_cjk(title) != _has_cjk(meta_title)):
         return "partial", (f"跨语言标题无法机器比对（声称中文/登记英文或反之,相似度 "
-                           f"{sim:.2f} 不作编造依据）→ 建议人工核对"), True
+                           f"{sim:.2f} 不作编造依据）→ 建议人工核对"), True, csl
     if title and sim < 0.50:
         return "invalid", (f"DOI 元数据标题相似度仅 {sim:.2f} → DOI 指向的不是这篇论文，"
-                           f"疑似编造或错引（DOI 实际为《{str(meta_title)[:60]}》）"), True
+                           f"疑似编造或错引（DOI 实际为《{str(meta_title)[:60]}》）"), True, csl
     year_note = ""
     if meta_year and year:
         try:
@@ -597,8 +635,8 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
         except (TypeError, ValueError):
             pass
     if title and sim < 0.82:
-        return "partial", f"DOI 元数据标题相似度 {sim:.2f}，建议人工复核{year_note}{jnote}{anote}", True
-    return (jadj or aadj), f"DOI 元数据核验一致（相似度 {sim:.2f}）{year_note}{jnote}{anote}", True
+        return "partial", f"DOI 元数据标题相似度 {sim:.2f}，建议人工复核{year_note}{jnote}{anote}{prov}", True, csl
+    return (jadj or aadj), f"DOI 元数据核验一致（相似度 {sim:.2f}）{year_note}{jnote}{anote}{prov}", True, csl
 
 
 _NCBI_LAST = [0.0]
@@ -1639,11 +1677,14 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
         retracted = False
         s2_matched = False
         if out["doi"] and DOI_RE.match(out["doi"]):
-            doi_adj, note, doi_matched = doi_metadata_match(
+            doi_adj, note, doi_matched, doi_csl = doi_metadata_match(
                 out["doi"], clean_title(str(ref.get("title") or "")), ref.get("year"), timeout,
                 str(ref.get("source") or ""),
                 str(ref.get("authors") or ""))
             out["checks"]["doi_metadata"] = {"matched": doi_matched, "adjust": doi_adj}
+            # v3.6:注册库权威元数据(GB/T 7714 导出原料)——仅 matched 时可信
+            if doi_matched and doi_csl:
+                out["checks"]["doi_metadata"]["csl"] = doi_csl
             if note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + note
             if doi_adj == "invalid":
@@ -2399,6 +2440,86 @@ def export_bibtex(results: list, path: str) -> int:
     return n
 
 
+def _gbt_type_code(r: dict) -> tuple:
+    """GB/T 7714 文献类型标识:期刊[J];预印本/网页[EB/OL];无卷期页的电子资源兜底[EB/OL]。
+    返回 (类型码, 是否电子资源)。"""
+    if r.get("arxiv"):
+        return "EB/OL", True
+    if (r.get("checks", {}).get("doi_metadata", {}) or {}).get("csl", {}).get("container"):
+        return "J", False
+    if r.get("url"):
+        return "EB/OL", True
+    return "EB/OL", True
+
+
+def export_gbt7714(results: list, path: str) -> int:
+    """v3.6 GB/T 7714-2025 参考文献表导出(verified + 元数据一致的 partial,返回条数)。
+    每条以注册库权威 CSL 元数据为准(mcp:checks.doi_metadata.csl;输入声称值兜底):
+      期刊: 作者1, 作者2, 作者3, 等. 题名[J]. 刊名, 年, 卷(期): 页码.
+      电子: 题名[EB/OL]. (发布年)[引用日期]. URL. DOI: ...
+    作者规则:≤3 全列;>3 取前 3 + ", 等"(中文条目)/", et al."(拉丁条目);
+    拉丁作者姓全大写+名首字母(取自 CSL 预格式化)。正文中文条目判定=题名含 CJK。
+    收录策略:verified 全收;partial 仅当 DOI 元数据**一致**(adjust=="" 且有 CSL,
+    如仅缺可选输入字段)——标题/期刊存疑的 partial 不收(宁缺毋错)。"""
+    n = 0
+    cite_date = time.strftime("%Y-%m-%d")
+    lines_out = []
+    for r in results:
+        dm = r.get("checks", {}).get("doi_metadata", {}) or {}
+        if r["verdict"] == "verified":
+            pass
+        elif (r["verdict"] == "partial" and dm.get("adjust") == ""
+              and dm.get("matched") and dm.get("csl")):
+            pass  # 元数据一致、仅缺可选输入字段的 partial:注册库已确认存在与内容
+        else:
+            continue
+        csl = (r.get("checks", {}).get("doi_metadata", {}) or {}).get("csl") or {}
+        title = (csl.get("title") or r.get("title") or "").strip() or "untitled"
+        year = str(csl.get("year") or r.get("year") or "").strip()
+        authors = list(csl.get("authors") or [])
+        if not authors:
+            raw = re.split(r"[,，;；、]", str(r.get("authors") or ""))
+            authors = [a.strip() for a in raw if a.strip()]
+        cjk_title = any("\u4e00" <= c <= "\u9fff" for c in title)
+        et_al = "等" if cjk_title else "et al"
+        if len(authors) > 3:
+            authors = authors[:3] + [et_al]
+        author_str = ", ".join(authors)
+        tcode, is_e = _gbt_type_code(r)
+        seg = []
+        if author_str:
+            seg.append(author_str + ".")
+        seg.append(f"{title}[{tcode}].")
+        container = (csl.get("container") or r.get("source") or "").strip()
+        vol = csl.get("volume") or ""
+        iss = csl.get("issue") or ""
+        page = csl.get("page") or ""
+        if tcode == "J" and container:
+            part = f"{container}, {year or 's.d.'}"
+            if vol:
+                part += f", {vol}"
+                if iss:
+                    part += f"({iss})"
+            if page:
+                part += f": {page}"
+            seg.append(part + ".")
+        else:
+            if year:
+                seg.append(f"({year}).")
+            seg.append(f"[{cite_date}].")
+        url = (r.get("url") or "").strip()
+        doi = (r.get("doi") or "").strip()
+        if doi and not url.lower().startswith("https://doi.org/"):
+            seg.append(f"DOI: {doi}.")  # DOI 尾注(规范形);url 为 doi.org 链接时已承载
+        if url:
+            seg.append(f"{url}.")
+        lines_out.append(" ".join(seg))
+        n += 1
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines_out) + ("\n" if lines_out else ""))
+    return n
+
+
 def export_csv(results: list, path: str) -> None:
     """全量审计台账 CSV（utf-8-sig，Excel 直接打开不乱码）。单元格做公式注入中和。"""
     cols = ["index", "title", "verdict", "tier", "http_status", "needs_human_check",
@@ -2681,9 +2802,13 @@ def main() -> int:
     ap.add_argument("--strict", action="store_true", help="unreachable/invalid 计为失败（exit 1）")
     ap.add_argument("--timeout", type=float, default=10.0, help="单 URL 超时秒数（默认 10）")
     ap.add_argument("--interval", type=float, default=1.0, help="请求间隔秒数（默认 1.0）")
+    ap.add_argument("--cn", action="store_true",
+                    help="CN 韧性预设(v3.6)：超时下限 25s；DOI.org 三试全败时回源 "
+                         "api.crossref.org 同构 CSL(独立主机)；其余逻辑不变")
     ap.add_argument("--profile", choices=["general", "medical"], default="general",
                     help="信源预设：medical=医学期刊层域名扩展(Cochrane/CTS/NMPA/CDC/万方等)+社区层降级警示")
     ap.add_argument("--export", help="附加导出，逗号分隔：bibtex（仅verified，可直接进论文）/ "
+                    "gbt7714（v3.6 GB/T 7714-2025 参考文献表,注册库元数据为准）/ "
                     "csv（全量审计台账）/ auditjson（v1.9 透明工作底稿：逐项检查明细）")
     ap.add_argument("--format", choices=["md", "html"], default="md",
                     help="报告格式：md（默认）或 html（自包含单文件，零外链，可直接分享/存档）")
@@ -2742,6 +2867,8 @@ def main() -> int:
         urllib.request.install_opener(urllib.request.build_opener(
             urllib.request.ProxyHandler({"http": proxy, "https": proxy})))
         print(f"[proxy] 显式代理已启用：{proxy}")
+    if getattr(args, "cn", False) and args.timeout < 25:
+        args.timeout = 25.0  # --cn 超时下限(v3.6):跨国 RTT 抖动下不误判 unreachable
     args.cache = not args.no_cache
     args.cache_path = os.path.expanduser(args.cache_path)
     _OPTS.update({
@@ -2754,6 +2881,7 @@ def main() -> int:
         "fast_judge_threshold": args.fast_judge_threshold,
         "mailto": args.mailto.strip(),
         "contexts": not args.no_contexts,
+        "cn_mode": bool(getattr(args, "cn", False)),
         "judge_url": args.judge_url.strip(),
         "judge_model": args.judge_model.strip(),
     })
@@ -2924,6 +3052,11 @@ def main() -> int:
                 p = base + ".bib"
                 n = export_bibtex(results, p)
                 print(f"导出：{p}（{n} 条 verified，可直接进论文）")
+            elif fmt in ("gbt7714", "gb"):
+                p = base + "_GB-T7714.txt"
+                n = export_gbt7714(results, p)
+                print(f"导出：{p}（{n} 条 verified/元数据一致，GB/T 7714-2025 参考文献表，"
+                      "元数据以注册库登记为准）")
             elif fmt == "csv":
                 p = base + ".csv"
                 export_csv(results, p)
@@ -2933,7 +3066,7 @@ def main() -> int:
                 export_audit(results, p, args.offline, args.profile)
                 print(f"导出：{p}（透明工作底稿：逐项检查明细）")
             else:
-                print(f"⚠️ 未知导出格式 {fmt}（支持 bibtex,csv,auditjson）", file=sys.stderr)
+                print(f"⚠️ 未知导出格式 {fmt}（支持 bibtex,gbt7714,csv,auditjson）", file=sys.stderr)
 
     bad = [r for r in results if r["verdict"] in ("unreachable", "invalid")]
     print(f"\n报告：{args.out}\nJSON：{json_path}")

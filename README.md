@@ -21,6 +21,12 @@ python scripts/verify_refs.py --refs examples/demo_refs.json
 ## 30-second quickstart
 
 ```bash
+# MCP server (for agents — Claude Code / Codex / Cursor):
+uvx --from "git+https://github.com/docsor1212/cite-holmes#subdirectory=mcp" cite-holmes-mcp
+```
+
+
+```bash
 python scripts/verify_refs.py --refs refs.json --out report.md
 # or verify straight from your reference manager (v1.9):
 python scripts/verify_refs.py --refs bibliography.bib --out report.md
@@ -30,6 +36,23 @@ Open `report.md`: CiteScore + pre-submission conclusion at the top,
 per-reference verdicts below.
 Medical work: add `--profile medical`.  Writing a paper: add `--export bibtex`.
 Institution/CI: add `--mailto you@lab.edu` (Crossref polite pool).
+
+## What NOT to do (anti-patterns)
+
+- **Don't feed `semantic` fields from the same model that wrote the draft** —
+  the semantic cap trusts structured model judgments; self-review defeats it.
+- **Don't treat `verified` as "the paper supports my claim"** — verified means
+  the source exists at an authoritative tier and registry metadata matches the
+  claimed title/authors/journal/year. Whether the *specific sentence* is
+  supported is the semantic layer (agent judgment, or L4 cascade with a judge).
+- **Don't batch >50 references per MCP call** — the server rejects oversized
+  batches by design; split them.
+- **Don't hand-edit `mcp/verify_refs.py`** — it is a sha-gated copy of
+  `scripts/verify_refs.py`; edit the trunk and run `mcp/sync_engine.sh`.
+- **Don't cite from the report without reading `needs_human_check` flags** —
+  partial/unreachable items carry explicit re-check instructions on purpose.
+- **Don't skip `--cn` on lossy CN egress and then report unreachable as
+  "fake"** — unreachable is not invalid; re-run with `--cn` or a proxy first.
 
 ## How it works
 

@@ -32,6 +32,8 @@ python scripts/verify_refs.py --refs refs.json --out report.md
 python scripts/verify_refs.py --refs bibliography.bib --out report.md
 ```
 
+**China mirror (ModelScope 魔搭)**: <https://modelscope.cn/skills/Docsor/cite-holmes> — if you find this skill useful, a like there helps others find it.
+
 Open `report.md`: CiteScore + pre-submission conclusion at the top,
 per-reference verdicts below.
 Medical work: add `--profile medical`.  Writing a paper: add `--export bibtex`.
@@ -207,6 +209,17 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.6.0** — GB/T 7714-2025 reference-list export (`--export gbt7714`):
+  verified entries formatted per the Chinese national bibliography standard
+  effective 2026-07-01, **built from registry-authoritative CSL metadata**
+  (authors in GB/T abbreviation form, [J]/[EB/OL] type codes,
+  volume(issue):pages, DOI) — not from user-claimed fields. Title-disputed
+  partials are excluded by policy (better absent than wrong). Plus `--cn`
+  resilience preset: 25s timeout floor and a Crossref second-host fallback
+  for DOI metadata (independent host; doi.org outages no longer blind the
+  checker). Anti-pattern guide + scenario best-practices docs. MCP server:
+  batch cap 50, output clipping, packaged entry point (tag mcp-v2.0.0).
+  292 tests green.
 - **v3.5.0** — fast-judge pre-screen (opt-in): point `--fast-judge-url` at a
   [laya_service.py](https://github.com/docsor1212/cite-holmes) endpoint (322M
   distilled classifier, ~24ms/item on GPU) and references stuck in

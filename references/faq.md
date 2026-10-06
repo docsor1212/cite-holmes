@@ -111,3 +111,9 @@ not_in_source / contradicted / unclear）。`not_in_source` 与 `contradicted`
 api.crossref.org（独立主机，同构 CSL 元数据，报告注记会写明「经 Crossref
 回源」）。仍不通时 `--proxy` / `HTTPS_PROXY` 继续兜底；`unreachable` 不等于
 假引用，换网重跑后再下结论。
+
+## Q: 能核验"正文里的引用"而不只是参考文献清单吗？（v3.7.0）
+能。`--check-document paper.md --refs refs.json`：解析正文 in-text 标记
+（[12]/[1-4]/(Author, Year)/doi.org 链接），把每处引用绑定到清单条目并计算
+"引文句 ↔ 被引标题"锚词率——低于 0.34 标记为疑似错配引文（引 A 文却引了 B 句）。
+锚词率低≠错引，是语义层人工复核候选；语义判断仍由 agent 负责。

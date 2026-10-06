@@ -33,6 +33,7 @@ for _cand in (_HERE, os.path.join(os.path.dirname(_HERE), "scripts")):
         break
 
 import verify_refs as vr  # noqa: E402
+from verify_refs import check_document as _check_document_impl  # noqa: E402  # v3.7.0
 
 try:
     from fastmcp import FastMCP
@@ -163,6 +164,29 @@ if _MCP_OK:
         official registries (DOI.org, PubMed E-utilities, arXiv, Crossref/Retraction Watch);
         no API keys required, no telemetry."""
         return json.dumps(verify_references_impl(claims, timeout),
+                          ensure_ascii=False, indent=1)
+
+    @mcp.tool
+    def check_document(claims: list, document: str, timeout: float = 15.0,
+                       anchor_threshold: float = 0.34) -> str:
+        """Context-level citation check: parse in-text citation markers in a
+        document ([12], [1-4], (Author, Year), doi.org links), bind each to the
+        verified reference list, and score anchor-word overlap between the
+        citing sentence and the cited title (low = possible mis-citation for
+        human review). Complements verify_references: list-level vs context-level."""
+        vr._net_reset()
+        results = []
+        for i, ref in enumerate(claims, 1):
+            try:
+                results.append(vr.verify_one(ref, i, False, float(timeout), False))
+            except Exception:
+                results.append({"index": i, "title": str(ref.get("title") or "")[:48],
+                                "verdict": "invalid", "note": "处理异常",
+                                "needs_human_check": True})
+        vr.mark_duplicates(results)
+        vr.apply_semantic_cap(results)
+        cd = _check_document_impl(document, results, float(anchor_threshold))
+        return json.dumps({"version": vr.VERSION, "document_check": cd},
                           ensure_ascii=False, indent=1)
 
     @mcp.tool

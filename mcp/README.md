@@ -11,6 +11,7 @@ Three MCP primitives:
 | Primitive | Name | What it does |
 |---|---|---|
 | tool | `verify_references` | Verify a batch of references (≤50); returns CiteScore 0–100 + per-item verdicts with evidence chain |
+| tool | `check_document` | Context-level check: parse in-text markers ([12]/[1-4]/(Author, Year)/doi.org links), bind to the reference list, flag low anchor-word overlap as possible mis-citations |
 | tool | `explain_verdict` | Plain-language explanation of one verdict (evidence steps + suggested action); zero network |
 | resource | `cite-holmes://capability-matrix` | What the mechanical layer catches vs. what stays with the semantic layer |
 | resource | `cite-holmes://changelog` | Version history |

@@ -36,7 +36,7 @@ async def main():
         print("[initialize] connected ok (in-memory transport)")
         names = sorted(t.name for t in tools)
         print(f"[tools/list] {len(tools)} tools: {names}")
-        assert names == ["explain_verdict", "verify_references"], names
+        assert names == ["check_document", "explain_verdict", "verify_references"], names
 
         print("[tools/call verify_references] 3 claims (good DOI / bad DOI / PMID)...")
         res = await c.call_tool("verify_references",
@@ -48,6 +48,16 @@ async def main():
         for r in payload["results"]:
             print(f"  [{r['index']}] {r['verdict']:11s} {(r.get('title') or '')[:52]}")
         assert len(payload["results"]) == 3
+
+        print("[tools/call check_document] context-level check...")
+        doc = (" mitochondrial membranes bend as reported [1]. "
+               "Unicorn quantum healing proves the claim [2].")
+        res3 = await c.call_tool("check_document",
+                                 {"claims": CLAIMS, "document": doc})
+        cdj = json.loads(res3.content[0].text)["document_check"]
+        print(f"  in-text {cdj['n_citations']} 处:未绑定 {cdj['n_unbound']},"
+              f"低锚词 {cdj['n_low_anchor']}")
+        assert cdj["n_citations"] >= 2
 
         print("[tools/call explain_verdict] on the result above...")
         one = payload["results"][1]

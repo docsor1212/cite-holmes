@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.6.0"
+VERSION = "3.7.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -2398,6 +2398,151 @@ VERDICT_ZH = {"verified": "✅ verified", "partial": "🟡 partial", "unreachabl
               "invalid": "❌ invalid", "unverified": "⏸ unverified"}
 
 
+
+# ═══ v3.7.0 文档级引用核查(--check-document):从清单核验到上下文核验 ═══
+
+_CIT_NUM = re.compile(r"\[(\d{1,3}(?:\s*[,,]\s*\d{1,3})*)\]")
+_CIT_RANGE = re.compile(r"\[(\d{1,3})\s*-\s*(\d{1,3})\]")
+_CIT_AY = re.compile(
+    r"\(([A-Z][A-Za-z\-]+)(?:\s+et\s+al\.)?[,;]\s*(\d{4})\)"      # (Smith, 2023)/(Smith et al., 2023)
+    r"|([A-Z][A-Za-z\-]+\s+et\s+al\.)\s*\((\d{4})\)")               # Smith et al. (2023) 叙述式
+_CIT_DOI = re.compile(r"https?://(?:dx\.)?doi\.org/(10\.[^\s)\]}]+)", re.I)
+_SENT_SPLIT = re.compile(r"(?<=[。！？])\s*|(?<=[.!?])\s+(?=[A-Z0-9\u4e00-\u9fff])")
+_STOP = set("a an the of in on at to for and or is are was were be been with as by from "
+            "that this these those it its we our their his her study paper research "
+            "的 与 和 在 是 了 等 对 将 被 从 而 及 其 该 项 项".split())
+
+
+def _sentences(text: str):
+    parts = _SENT_SPLIT.split(text)
+    return [p.strip() for p in parts if p and len(p.strip()) > 2]
+
+
+def extract_citations(text: str) -> list:
+    """从正文抽取 in-text 引用标记,返回 [{marker, kind, sentence, index[]}]."""
+    out = []
+    for sent in _sentences(text):
+        found = {}
+        for m in _CIT_RANGE.finditer(sent):
+            lo, hi = int(m.group(1)), int(m.group(2))
+            if 1 <= lo <= hi <= 999 and hi - lo <= 20:
+                found[m.group(0)] = list(range(lo, hi + 1))
+        for m in _CIT_NUM.finditer(sent):
+            if m.group(0) in found:
+                continue
+            idxs = [int(x) for x in re.split(r"\s*[,,]\s*", m.group(1))]
+            if all(1 <= x <= 999 for x in idxs):
+                found[m.group(0)] = idxs
+        for m in _CIT_AY.finditer(sent):
+            if m.group(1):
+                found[m.group(0)] = ("author-year", m.group(1), m.group(2))
+            else:
+                found[m.group(0)] = ("author-year",
+                                     m.group(3).replace(" et al.", ""), m.group(4))
+        for m in _CIT_DOI.finditer(sent):
+            found[m.group(0)] = ("doi", m.group(1))
+        for marker, idxs in found.items():
+            kind = ("numeric" if isinstance(idxs, list)
+                    else idxs[0] if isinstance(idxs, tuple) else "numeric")
+            out.append({"marker": marker, "kind": kind,
+                        "sentence": sent[:400], "index": idxs})
+    return out
+
+
+def _norm_word(w: str) -> str:
+    """轻词形归一:去复数/时态尾缀(≥5 字符才剥,防过削)。"""
+    for suf in ("ing", "ies", "ed", "es", "s"):
+        if len(w) > 4 and w.endswith(suf):
+            return w[: -len(suf)]
+    return w
+
+
+def _content_words(s: str) -> set:
+    return {_norm_word(w) for w in
+            re.findall(r"[a-z0-9\u4e00-\u9fff]{2,}", (s or "").lower())
+            if w not in _STOP}
+
+
+def anchor_rate(sentence: str, ref: dict) -> float:
+    """引文句与被引条目标题的内容词重叠率(分母=标题词,0~1)。
+    匹配容忍:完全相等或 ≥5 字符前缀互吞(thermometry~thermometer、cell~cells)。"""
+    tw = _content_words(ref.get("title") or
+                        (ref.get("checks", {}).get("doi_metadata", {})
+                         .get("csl", {}) or {}).get("title") or "")
+    if not tw:
+        return 0.0
+    sw = _content_words(sentence)
+    hit = 0
+    for t in tw:
+        if t in sw or any(t.startswith(s) or s.startswith(t)
+                          for s in sw if min(len(s), len(t)) >= 5) \
+           or any(s == t for s in sw):
+            hit += 1
+    return hit / len(tw)
+
+
+def bind_citation(cit: dict, results: list) -> dict:
+    """标记→条目绑定。numeric=results[index-1];author-year=姓氏+年匹配;doi=直配。"""
+    idxs = cit["index"]
+    if isinstance(idxs, list):
+        bound, missing = [], []
+        for n in idxs:
+            r = next((x for x in results if x.get("index") == n), None)
+            (bound if r else missing).append(r if r else n)
+        return {"marker": cit["marker"], "kind": "numeric",
+                "bound": bound, "unbound": missing}
+    if idxs[0] == "doi":
+        r = next((x for x in results
+                  if (x.get("doi") or "").lower() == idxs[1].lower()), None)
+        return {"marker": cit["marker"], "kind": "doi",
+                "bound": [r] if r else [], "unbound": [] if r else [idxs[1]]}
+    _, surname, year = idxs
+    cands = [x for x in results
+             if str(x.get("year") or "") == year
+             and surname.lower() in _content_words(
+                 json.dumps((x.get("checks", {}).get("doi_metadata", {})
+                             .get("csl", {}) or {}).get("authors", []),
+                            ensure_ascii=False).lower())
+             or surname.lower() in (x.get("title") or "").lower()]
+    return {"marker": cit["marker"], "kind": "author-year",
+            "bound": cands[:1], "unbound": [] if cands else [f"{surname} {year}"]}
+
+
+def check_document(text: str, results: list, anchor_threshold: float = 0.34) -> dict:
+    """文档级上下文核验:抽取→绑定→锚词匹配。语义层(句子是否真被支撑)仍归 agent。"""
+    cits = extract_citations(text)
+    out = []
+    for c in cits:
+        b = bind_citation(c, results)
+        for r in (b["bound"] or [None])[:1]:
+            ar = anchor_rate(c["sentence"], r) if r else 0.0
+            entry = {"marker": c["marker"], "sentence": c["sentence"][:300],
+                     "ref_index": (r or {}).get("index"),
+                     "ref_verdict": (r or {}).get("verdict"),
+                     "anchor_rate": round(ar, 3),
+                     "anchor": "ok" if ar >= anchor_threshold else "low",
+                     "bound": bool(r)}
+            if not r:
+                entry["note"] = "未绑定:正文中引用了清单外的编号/条目"
+                entry["anchor"] = "n/a"
+            out.append(entry)
+    unbound = [e for e in out if not e["bound"]]
+    low = [e for e in out if e["bound"] and e["anchor"] == "low"]
+    return {"citations": out, "n_citations": len(out),
+            "n_unbound": len(unbound), "n_low_anchor": len(low),
+            "anchor_threshold": anchor_threshold,
+            "note": ("锚词率=引文句与被引标题的内容词重叠(阈值 %.2f);low≠错引,"
+                     "是语义层人工复核候选" % anchor_threshold)}
+
+
+def main_with_check_document(args, results, text_path):
+    text = open(text_path, encoding="utf-8").read()
+    cd = check_document(text, results,
+                        float(getattr(args, "anchor_threshold", 0.34) or 0.34))
+    return cd
+
+
+
 def export_bibtex(results: list, path: str) -> int:
     """仅导出 verified 条目为 BibTeX（可直接导入论文参考文献管理器）。返回条数。
     字段值经 bib_safe 加固（剥除花括号/换行，防 @entry 逃逸），citation key 保证唯一。"""
@@ -2517,6 +2662,61 @@ def export_gbt7714(results: list, path: str) -> int:
         n += 1
     with open(path, "w", encoding="utf-8") as f:
         f.write("\n".join(lines_out) + ("\n" if lines_out else ""))
+    return n
+
+
+def export_ris(results: list, path: str) -> int:
+    """v3.7.0 RIS 导出(Zotero/EndNote 通用,与 v1.9 BibTeX 导入构成回环)。
+    收录策略与 GB/T 相同:verified + 元数据一致 partial。AU 每作者一行。"""
+    n = 0
+    out = []
+    for r in results:
+        dm = r.get("checks", {}).get("doi_metadata", {}) or {}
+        if r["verdict"] == "verified":
+            pass
+        elif (r["verdict"] == "partial" and dm.get("adjust") == ""
+              and dm.get("matched") and dm.get("csl")):
+            pass
+        else:
+            continue
+        csl = dm.get("csl") or {}
+        title = (csl.get("title") or r.get("title") or "").strip() or "untitled"
+        out.append("TY  - " + ("JOUR" if csl.get("container") else "GEN"))
+        out.append("TI  - " + title)
+        for a in (csl.get("authors") or []):
+            out.append("AU  - " + a)
+        if not csl.get("authors") and r.get("authors"):
+            for a in re.split(r"[,，;；、]", str(r["authors"])):
+                if a.strip():
+                    out.append("AU  - " + a.strip())
+        if csl.get("container"):
+            out.append("JO  - " + csl["container"])
+        if r.get("source"):
+            out.append("PB  - " + str(r["source"])[:200])
+        if csl.get("year") or r.get("year"):
+            out.append("PY  - " + str(csl.get("year") or r.get("year")))
+        if csl.get("volume"):
+            out.append("VL  - " + csl["volume"])
+        if csl.get("issue"):
+            out.append("IS  - " + csl["issue"])
+        if csl.get("page"):
+            pg = str(csl["page"])
+            if "-" in pg:
+                sp, ep = pg.split("-", 1)
+                out.append("SP  - " + sp.strip())
+                out.append("EP  - " + ep.strip())
+            else:
+                out.append("SP  - " + pg)
+        if r.get("doi"):
+            out.append("DO  - " + str(r["doi"]))
+        if r.get("url"):
+            out.append("UR  - " + str(r["url"]))
+        out.append("N1  - cite-holmes verified (" + r["verdict"] + ")")
+        out.append("ER  - ")
+        out.append("")
+        n += 1
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(out))
     return n
 
 
@@ -2653,6 +2853,9 @@ def render_md(results: list, offline: bool, profile: str = "general") -> str:
               "- `unreachable`：抓取失败（404/超时/反爬）—— 不等于不存在，需人工打开复核",
               "- `invalid`：无 URL/DOI 或格式错误 —— 不得进入报告",
               "- 语义验证（来源是否支持论断）由模型完成，本报告只覆盖机械层", ""]
+    # v3.7.0 求星合规铺设:交付物尾注(每报告一次,低调一行;家族任务 10-06)
+    lines += ["", "> 本文档由 cite-holmes 生成（[GitHub](https://github.com/docsor1212/cite-holmes) · "
+              "[SkillHub](https://skillhub.cn/skills/indiv-sorsor/cite-holmes)）· 觉得有用欢迎 Star / 收藏", ""]
     return "\n".join(lines)
 
 
@@ -2789,6 +2992,9 @@ border-top:1px solid #d8d2c4;padding-top:8px}}
 </ul>
 <footer>语义验证（来源是否支持论断）由模型完成，本报告只覆盖机械层；
 指向真实可信页面的精心伪造仍需人工判断。cite-holmes · Cite Holmes</footer>
+<footer style="margin-top:24px;padding-top:12px;border-top:1px solid #eee;color:#9aa0a6;font-size:12px;text-align:center;">
+本文档由 cite-holmes 生成 · <a href="https://github.com/docsor1212/cite-holmes" style="color:#9aa0a6;">GitHub</a> · <a href="https://skillhub.cn/skills/indiv-sorsor/cite-holmes" style="color:#9aa0a6;">SkillHub</a> · 觉得有用欢迎 Star / 收藏
+</footer>
 </body></html>"""
 
 
@@ -2802,6 +3008,15 @@ def main() -> int:
     ap.add_argument("--strict", action="store_true", help="unreachable/invalid 计为失败（exit 1）")
     ap.add_argument("--timeout", type=float, default=10.0, help="单 URL 超时秒数（默认 10）")
     ap.add_argument("--interval", type=float, default=1.0, help="请求间隔秒数（默认 1.0）")
+    ap.add_argument("--check-document", default="",
+                    help="v3.7.0 文档级上下文核验:给定正文 markdown/text,解析 in-text "
+                         "引用标记([12]/[1-4]/(Author, Year)/doi.org 链接),绑定 --refs "
+                         "核验结果并做锚词匹配(需与 --refs 同用)")
+    ap.add_argument("--anchor-threshold", type=float, default=0.34,
+                    help="上下文核验锚词率阈值(默认 0.34;低于=疑似错配引文,人工复核)")
+    ap.add_argument("--preflight", action="store_true",
+                    help="v3.7.0 注册库预检面板:核验前探测各官方源可达性(3s 超时),"
+                         "弱网环境先看状态再跑批")
     ap.add_argument("--cn", action="store_true",
                     help="CN 韧性预设(v3.6)：超时下限 25s；DOI.org 三试全败时回源 "
                          "api.crossref.org 同构 CSL(独立主机)；其余逻辑不变")
@@ -2809,6 +3024,7 @@ def main() -> int:
                     help="信源预设：medical=医学期刊层域名扩展(Cochrane/CTS/NMPA/CDC/万方等)+社区层降级警示")
     ap.add_argument("--export", help="附加导出，逗号分隔：bibtex（仅verified，可直接进论文）/ "
                     "gbt7714（v3.6 GB/T 7714-2025 参考文献表,注册库元数据为准）/ "
+                    "ris（v3.7 RIS,Zotero/EndNote 通用）/ "
                     "csv（全量审计台账）/ auditjson（v1.9 透明工作底稿：逐项检查明细）")
     ap.add_argument("--format", choices=["md", "html"], default="md",
                     help="报告格式：md（默认）或 html（自包含单文件，零外链，可直接分享/存档）")
@@ -2869,6 +3085,23 @@ def main() -> int:
         print(f"[proxy] 显式代理已启用：{proxy}")
     if getattr(args, "cn", False) and args.timeout < 25:
         args.timeout = 25.0  # --cn 超时下限(v3.6):跨国 RTT 抖动下不误判 unreachable
+    if getattr(args, "preflight", False):
+        # v3.7.0 注册库预检面板:3s 探测,弱网先看状态再跑批(CN 韧性可观测化)
+        import socket as _sk
+        print("== 注册库预检(3s 超时) ==")
+        for name, host, port in (("DOI.org", "doi.org", 443),
+                                 ("PubMed E-utilities", "eutils.ncbi.nlm.nih.gov", 443),
+                                 ("arXiv", "export.arxiv.org", 443),
+                                 ("Crossref", "api.crossref.org", 443),
+                                 ("Semantic Scholar", "api.semanticscholar.org", 443),
+                                 ("Wayback", "web.archive.org", 443)):
+            t0 = time.time()
+            try:
+                _sk.create_connection((host, port), timeout=3)
+                st = f"✓ 可达 ({(time.time()-t0)*1000:.0f}ms)"
+            except Exception as e:
+                st = f"✗ 不可达({type(e).__name__})"
+            print(f"  {name:20s} {st}")
     args.cache = not args.no_cache
     args.cache_path = os.path.expanduser(args.cache_path)
     _OPTS.update({
@@ -3037,12 +3270,28 @@ def main() -> int:
     with open(args.out, "w", encoding="utf-8") as f:
         f.write(content)
     json_path = args.json_out or (args.out.rsplit(".", 1)[0] + ".json")
+    cd = None
+    if getattr(args, "check_document", ""):
+        cd = check_document(open(args.check_document, encoding="utf-8").read(),
+                            results, float(args.anchor_threshold))
+    _json_doc = {"version": VERSION, "profile": args.profile, "offline": args.offline,
+                 "bluf": render_bluf_dict(results, scorecard),  # v3.2.0 规范 L1:对象
+                 "bluf_yaml": render_bluf(results, scorecard),  # 兼容:YAML 文本
+                 "scorecard": scorecard, "results": results}
+    if cd is not None:
+        _json_doc["context_check"] = cd
     with open(json_path, "w", encoding="utf-8") as f:
-        json.dump({"version": VERSION, "profile": args.profile, "offline": args.offline,
-                   "bluf": render_bluf_dict(results, scorecard),  # v3.2.0 规范 L1:对象
-                   "bluf_yaml": render_bluf(results, scorecard),  # 兼容:YAML 文本
-                   "scorecard": scorecard, "results": results},
-                  f, ensure_ascii=False, indent=2)
+        json.dump(_json_doc, f, ensure_ascii=False, indent=2)
+    if cd is not None:
+        print(f"\n== 上下文核验({args.check_document}) ==")
+        print(f"  in-text 引用 {cd['n_citations']} 处:未绑定 {cd['n_unbound']},"
+              f"锚词不足 {cd['n_low_anchor']}(阈值 {cd['anchor_threshold']})")
+        for c in cd["citations"][:12]:
+            flag = ("未绑定" if not c["bound"] else
+                    f"锚词率 {c['anchor_rate']}{'⚠' if c['anchor'] == 'low' else ''}")
+            print(f"  {c['marker']:22s} → 条目{c['ref_index'] or '-'} {flag}")
+        if cd["n_citations"] > 12:
+            print(f"  …其余 {cd['n_citations'] - 12} 处见 JSON")
     print(f"CiteScore: {scorecard['score']}/100 ({scorecard['grade']} 级，{scorecard['total']} 条)")
 
     if args.export:
@@ -3052,6 +3301,10 @@ def main() -> int:
                 p = base + ".bib"
                 n = export_bibtex(results, p)
                 print(f"导出：{p}（{n} 条 verified，可直接进论文）")
+            elif fmt == "ris":
+                p = base + ".ris"
+                n = export_ris(results, p)
+                print(f"导出：{p}（{n} 条，RIS/Zotero/EndNote 通用）")
             elif fmt in ("gbt7714", "gb"):
                 p = base + "_GB-T7714.txt"
                 n = export_gbt7714(results, p)
@@ -3066,7 +3319,7 @@ def main() -> int:
                 export_audit(results, p, args.offline, args.profile)
                 print(f"导出：{p}（透明工作底稿：逐项检查明细）")
             else:
-                print(f"⚠️ 未知导出格式 {fmt}（支持 bibtex,gbt7714,csv,auditjson）", file=sys.stderr)
+                print(f"⚠️ 未知导出格式 {fmt}（支持 bibtex,gbt7714,ris,csv,auditjson）", file=sys.stderr)
 
     bad = [r for r in results if r["verdict"] in ("unreachable", "invalid")]
     print(f"\n报告：{args.out}\nJSON：{json_path}")

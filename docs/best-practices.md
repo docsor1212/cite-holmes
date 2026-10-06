@@ -38,3 +38,14 @@ python scripts/verify_refs.py --refs refs.json --strict --offline=false \
 ```
 - Disk cache (7-day TTL) keeps repeat runs fast and deterministic; use
   `--refresh-cache` when you need fresh registry state.
+
+## 6. Context check for a finished draft (成稿上下文核验, v3.7.0)
+```bash
+python scripts/verify_refs.py --refs refs.json --check-document paper.md --out report.md
+```
+- Every in-text marker is bound to a reference entry; the citing sentence is
+  scored against the cited title (anchor rate, threshold 0.34).
+- `低锚词/low anchor` = the citing sentence shares almost no content words with
+  the cited title — the classic "cited paper A, claimed paper B" mis-citation.
+  Review these before submission; semantic support itself stays with the agent.
+- Available over MCP as the `check_document` tool for agent workflows.

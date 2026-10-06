@@ -267,7 +267,7 @@ class TestEmbedNaNFallback(unittest.TestCase):
 
 class TestVersion(unittest.TestCase):
     def test_t18_version_and_catalog(self):
-        self.assertEqual(vr.VERSION, "3.6.0")
+        self.assertEqual(vr.VERSION, "3.7.0")
         cat = None
         src = open(os.path.join(HERE, "..", "scripts", "verify_refs.py"),
                    encoding="utf-8").read()

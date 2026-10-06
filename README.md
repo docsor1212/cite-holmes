@@ -1,5 +1,7 @@
 # Cite Holmes 🔍
 
+[![GitHub Stars](https://img.shields.io/github/stars/docsor1212/cite-holmes?style=social&label=Star)](https://github.com/docsor1212/cite-holmes/stargazers)
+
 ![icon](assets/icon-512.png)
 
 **Deep research that interrogates its own sources.**
@@ -30,6 +32,8 @@ uvx --from "git+https://github.com/docsor1212/cite-holmes#subdirectory=mcp" cite
 python scripts/verify_refs.py --refs refs.json --out report.md
 # or verify straight from your reference manager (v1.9):
 python scripts/verify_refs.py --refs bibliography.bib --out report.md
+# v3.7.0 context check — verify in-text citations inside a finished draft:
+python scripts/verify_refs.py --refs bibliography.bib --check-document paper.md --out report.md
 ```
 
 **China mirror (ModelScope 魔搭)**: <https://modelscope.cn/skills/Docsor/cite-holmes> — if you find this skill useful, a like there helps others find it.
@@ -209,6 +213,15 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.7.0** — document-level citation checking (`--check-document paper.md`):
+  parse in-text citation markers ([12], [1-4], (Author, Year), doi.org links),
+  bind each marker to the verified reference list, and score anchor-word
+  overlap between the citing sentence and the cited title — low anchors are
+  flagged as possible mis-citations for human review. This moves verification
+  from the reference *list* to the *context*: the list can be clean while the
+  citations still point at the wrong papers. Also: `check_document` as a third
+  MCP tool; RIS export (Zotero/EndNote round-trip); `--preflight` registry
+  status panel. 292 tests green.
 - **v3.6.0** — GB/T 7714-2025 reference-list export (`--export gbt7714`):
   verified entries formatted per the Chinese national bibliography standard
   effective 2026-07-01, **built from registry-authoritative CSL metadata**

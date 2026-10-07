@@ -1,4 +1,4 @@
-# references/ 索引（v3.8.0 新增——回应评测 convention/structure 失分点）
+# references/ 索引（v3.8.0 新增）
 
 | 文件 | 用途 | 何时读 |
 |---|---|---|

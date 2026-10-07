@@ -213,8 +213,7 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
-- **v3.8.0** — completeness release, driven by the official SkillHub
-  evaluation: end-to-end worked example (input refs → real generated report →
+- **v3.8.0** — documentation & examples completeness release: end-to-end worked example (input refs → real generated report →
   all four export formats, shipped under `examples/end-to-end/`);
   `references/INDEX.md` + consolidated anti-patterns list (incl. "trigger-word
   mis-fires" and cross-language mixed-citation boundary); **context-check

@@ -1,4 +1,4 @@
-# 端到端对照示例（v3.8.0——回应评测 convention/docQuality 失分点）
+# 端到端对照示例（输入 → 命令 → 实际输出）
 
 输入 → 命令 → 实际输出，三件套可直接复跑：
 
@@ -18,3 +18,6 @@ python scripts/verify_refs.py --refs end-to-end/research_refs.json \
 
 > 复跑需网络（DOI.org/PubMed）。判定含时效字段（撤稿/被引），数字可能随时间小幅变化
 > ——以你复跑时的输出为准，结构不变。
+
+> SkillHub 包注：为符合平台文件类型白名单，`exports/` 导出样例文件不随
+> SkillHub 包分发（GitHub/ClawHub 包完整附带）——格式以本页表格描述为准。

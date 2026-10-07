@@ -69,7 +69,7 @@ class TestV110(unittest.TestCase):
     # ---------- 版本 ----------
 
     def test_version_bumped_110(self):
-        self.assertEqual(vr.VERSION, "3.7.0")
+        self.assertEqual(vr.VERSION, "3.8.0")
 
     # ---------- 并行验证 ----------
 

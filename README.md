@@ -213,6 +213,14 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.8.0** — completeness release, driven by the official SkillHub
+  evaluation: end-to-end worked example (input refs → real generated report →
+  all four export formats, shipped under `examples/end-to-end/`);
+  `references/INDEX.md` + consolidated anti-patterns list (incl. "trigger-word
+  mis-fires" and cross-language mixed-citation boundary); **context-check
+  results now appear in the md/html reports** (previously console/JSON only);
+  author-surname anchor credit (a citing sentence naming a registry author
+  counts as strong binding evidence). 299 tests green.
 - **v3.7.0** — document-level citation checking (`--check-document paper.md`):
   parse in-text citation markers ([12], [1-4], (Author, Year), doi.org links),
   bind each marker to the verified reference list, and score anchor-word

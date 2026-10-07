@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.7.0"
+VERSION = "3.8.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -2466,9 +2466,8 @@ def _content_words(s: str) -> set:
 def anchor_rate(sentence: str, ref: dict) -> float:
     """引文句与被引条目标题的内容词重叠率(分母=标题词,0~1)。
     匹配容忍:完全相等或 ≥5 字符前缀互吞(thermometry~thermometer、cell~cells)。"""
-    tw = _content_words(ref.get("title") or
-                        (ref.get("checks", {}).get("doi_metadata", {})
-                         .get("csl", {}) or {}).get("title") or "")
+    csl = (ref.get("checks", {}).get("doi_metadata", {}) or {}).get("csl", {}) or {}
+    tw = _content_words(ref.get("title") or csl.get("title") or "")
     if not tw:
         return 0.0
     sw = _content_words(sentence)
@@ -2478,7 +2477,11 @@ def anchor_rate(sentence: str, ref: dict) -> float:
                           for s in sw if min(len(s), len(t)) >= 5) \
            or any(s == t for s in sw):
             hit += 1
-    return hit / len(tw)
+    # v3.8.0:作者姓氏出现在引文句=强绑定证据(注册库权威名),计 1 词命中
+    surnames = {a.split()[0].lower() for a in (csl.get("authors") or []) if a.split()}
+    if surnames & sw:
+        hit += 1
+    return min(hit, len(tw)) / len(tw)
 
 
 def bind_citation(cit: dict, results: list) -> dict:
@@ -2785,7 +2788,8 @@ def precheck_conclusion(sc: dict) -> str:
     return "✅ 投稿前结论：全部 verified——可进入投稿流程"
 
 
-def render_md(results: list, offline: bool, profile: str = "general") -> str:
+def render_md(results: list, offline: bool, profile: str = "general",
+              context_check: dict = None) -> str:
     sc = compute_scorecard(results)
     c = sc["counts"]
     lines = [
@@ -2853,13 +2857,27 @@ def render_md(results: list, offline: bool, profile: str = "general") -> str:
               "- `unreachable`：抓取失败（404/超时/反爬）—— 不等于不存在，需人工打开复核",
               "- `invalid`：无 URL/DOI 或格式错误 —— 不得进入报告",
               "- 语义验证（来源是否支持论断）由模型完成，本报告只覆盖机械层", ""]
+    # v3.8.0 上下文核验区(--check-document 时呈现)
+    if context_check:
+        lines += ["", "## 上下文核验（正文 in-text 引用）", "",
+                  f"- 正文引用 {context_check['n_citations']} 处：未绑定 "
+                  f"{context_check['n_unbound']}，锚词不足 {context_check['n_low_anchor']}"
+                  f"（阈值 {context_check['anchor_threshold']}）"]
+        for c in context_check["citations"]:
+            if not c["bound"]:
+                lines.append(f"- ⚠️ {c['marker']} 未绑定——正文引用了清单外的编号/条目")
+            elif c["anchor"] == "low":
+                lines.append(f"- ⚠️ {c['marker']} 锚词率 {c['anchor_rate']}"
+                             f"（疑似错配引文：引文句与被引标题内容词重叠过低）→ 人工复核")
+        lines += ["", "- 锚词率低≠错引：是语义层人工复核候选（句子是否真被支撑由模型判定）"]
     # v3.7.0 求星合规铺设:交付物尾注(每报告一次,低调一行;家族任务 10-06)
     lines += ["", "> 本文档由 cite-holmes 生成（[GitHub](https://github.com/docsor1212/cite-holmes) · "
               "[SkillHub](https://skillhub.cn/skills/indiv-sorsor/cite-holmes)）· 觉得有用欢迎 Star / 收藏", ""]
     return "\n".join(lines)
 
 
-def render_html(results: list, offline: bool, profile: str = "general") -> str:
+def render_html(results: list, offline: bool, profile: str = "general",
+                context_check: dict = None) -> str:
     """v1.7：自包含单文件 HTML 报告——零外链（无外部 CSS/JS/字体）、移动端可读，
     用作给导师/编辑的存档分享件（与 BibTeX/CSV 台账并列的第三种交付物）。
     动态内容全部经 html_escape；备注中的 URL 转为可点击链接。"""
@@ -2946,6 +2964,24 @@ def render_html(results: list, offline: bool, profile: str = "general") -> str:
     bluf = render_bluf(results, sc)
     bluf_v = html_escape("\n".join(l for l in bluf.splitlines()
                                 if not l.startswith("---")))
+    cc_html_block = ""
+    if context_check:
+        rows_cc = []
+        for item_cc in context_check["citations"]:  # v3.8.0:变量名避开 f-string 后文的 c
+            if not item_cc["bound"]:
+                state = "⚠️ 未绑定（清单外条目）"
+            elif item_cc["anchor"] == "low":
+                state = f"⚠️ 锚词率 {item_cc['anchor_rate']}（疑似错配引文，人工复核）"
+            else:
+                state = f"锚词率 {item_cc['anchor_rate']}"
+            rows_cc.append(f"<li>#{item_cc.get('ref_index') or '-'} {item_cc['marker']} — {state}<br>"
+                           f"<span class='note'>{item_cc['sentence'][:160]}</span></li>")
+        cc_html_block = ("<div style='margin-top:20px;padding:12px;border:1px solid #e5e5e5;border-radius:6px;'>"
+                         "<h3 style='margin:0 0 8px 0;'>上下文核验（正文 in-text 引用）</h3>"
+                         f"<p>共 {context_check['n_citations']} 处：未绑定 {context_check['n_unbound']}，"
+                         f"锚词不足 {context_check['n_low_anchor']}（阈值 {context_check['anchor_threshold']}）。"
+                         "锚词率低≠错引，是语义层人工复核候选。</p><ul>"
+                         + "".join(rows_cc) + "</ul></div>")
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -2992,6 +3028,7 @@ border-top:1px solid #d8d2c4;padding-top:8px}}
 </ul>
 <footer>语义验证（来源是否支持论断）由模型完成，本报告只覆盖机械层；
 指向真实可信页面的精心伪造仍需人工判断。cite-holmes · Cite Holmes</footer>
+{cc_html_block}
 <footer style="margin-top:24px;padding-top:12px;border-top:1px solid #eee;color:#9aa0a6;font-size:12px;text-align:center;">
 本文档由 cite-holmes 生成 · <a href="https://github.com/docsor1212/cite-holmes" style="color:#9aa0a6;">GitHub</a> · <a href="https://skillhub.cn/skills/indiv-sorsor/cite-holmes" style="color:#9aa0a6;">SkillHub</a> · 觉得有用欢迎 Star / 收藏
 </footer>
@@ -3265,15 +3302,17 @@ def main() -> int:
     apply_l4_cascade(results, args.timeout)  # v3.1：L4 证据升级级联（--judge-url 时激活；零配置零变化）
     apply_fast_judge(results, args.timeout)  # v3.5.0：fast-judge 预筛（--fast-judge-url 时激活；零配置零变化）
     scorecard = compute_scorecard(results)
-    content = (render_html(results, args.offline, args.profile) if args.format == "html"
-               else render_md(results, args.offline, args.profile))
-    with open(args.out, "w", encoding="utf-8") as f:
-        f.write(content)
-    json_path = args.json_out or (args.out.rsplit(".", 1)[0] + ".json")
     cd = None
     if getattr(args, "check_document", ""):
         cd = check_document(open(args.check_document, encoding="utf-8").read(),
                             results, float(args.anchor_threshold))
+    content = (render_html(results, args.offline, args.profile, context_check=cd)
+               if args.format == "html"
+               else render_md(results, args.offline, args.profile,
+                              context_check=cd))
+    with open(args.out, "w", encoding="utf-8") as f:
+        f.write(content)
+    json_path = args.json_out or (args.out.rsplit(".", 1)[0] + ".json")
     _json_doc = {"version": VERSION, "profile": args.profile, "offline": args.offline,
                  "bluf": render_bluf_dict(results, scorecard),  # v3.2.0 规范 L1:对象
                  "bluf_yaml": render_bluf(results, scorecard),  # 兼容:YAML 文本

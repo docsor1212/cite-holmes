@@ -5,22 +5,17 @@ author: DoctorQ Lab
 license: MIT
 description: >-
   Deep research that interrogates its own sources (Verified Deep Research):
-  calibrates scope first (3-5 sharp questions), then searches iteratively
-  across sources and languages and machine-verifies every citation. Also works
-  as a standalone citation checker: paste any reference list and it will
-  verify citations against official registries — full citation verification
-  covering hallucinated references, fabricated DOIs, fake PMIDs and arXiv IDs,
-  stitched fakes and retracted papers. A fact check for your bibliography, not
-  just a search. Five verdicts (verified / partial / unverified / unreachable /
-  invalid); unverified references never masquerade as real (AI hallucination
-  detection). Medical evidence mode (Cochrane/BMJ/ClinicalTrials/ChiCTR/NMPA/
-  CDC/NICE/Wanfang presets, PMID existence check via NCBI E-utilities) and
-  verified-bibliography export (BibTeX + audit CSV + JSON workpaper) built in.
-  Trigger matching: the trigger phrases above match by semantic similarity, not
-  exact string. Short requests like "verify this" may mis-trigger — just state
-  your real intent; mis-triggers have no side effects. To keep a class of
-  requests from triggering this skill, avoid combining research/verification
-  words with a reference list.
+  calibrates scope first (3-5 sharp questions), then searches iteratively and
+  machine-verifies every citation. Also a standalone citation checker: paste
+  any reference list and it runs full citation verification (it will verify
+  citations before you cite) against official registries —
+  hallucinated references, fabricated DOIs, fake PMIDs, arXiv IDs, stitched
+  fakes, retracted papers; a fact check for your bibliography. Five verdicts;
+  unverified references never masquerade as real (AI hallucination detection).
+  Medical mode (Cochrane/BMJ/ChiCTR/NMPA/CDC/NICE presets, PMID check) and
+  bibliography export (BibTeX/GB·T 7714-2025/RIS/CSV + JSON workpaper) built
+  in. Trigger matching is semantic, not exact — mis-triggers are harmless;
+  state your real intent to avoid them.
 when_to_use: >-
   Use when the user says "deep research", "look into", "investigate",
   "compare A vs B", "fact check", "verify this claim", "is it true that...",

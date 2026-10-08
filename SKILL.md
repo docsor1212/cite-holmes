@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 3.9.0
+version: 3.10.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -89,89 +89,79 @@ numbers/dates in the original page before quoting.
 ### 4. VERIFY (the heart of this skill)
 
 Register every reference in `research_refs.json` (schema in
-`references/report-template.md`), then verify on two layers:
+`references/report-template.md`), then run:
 
-**Semantic (the model must do this — claim-triplets, L1)**: decompose each
-cited claim into atomic claim-triplets (subject–relation–object, RefChecker
-style) BEFORE judging, then verify each triplet against the source —
-granularity moves from paragraph to triple, so "which half-sentence is wrong"
-becomes answerable. Register the verdict structurally so it becomes auditable
-workpaper, not a feeling:
+```bash
+python scripts/verify_refs.py --refs research_refs.json --out verify_report.md
+# Got a .bib from Zotero/EndNote? Feed it directly (v1.9):
+python scripts/verify_refs.py --refs bibliography.bib --out report.md
+# Environment self-check before a big batch (v3.10) — zero outbound calls
+# by default, add --net to probe every academic registry:
+python scripts/verify_refs.py --doctor --net
+```
+
+Five verdicts: `verified` / `partial` / `unreachable` (needs_human_check) /
+`invalid` / `unverified`. Every identifier (`url` / `doi` / `pmid` / `arxiv`)
+is cross-checked against its official registry (DOI.org metadata, NCBI
+E-utilities for PMID, export.arxiv.org for arXiv), so fabricated IDs are
+judged `invalid` — never silently `unreachable`. Every report opens with a
+**BLUF dual-reader header** (machine-parseable YAML + 5-line human TL;DR), a
+**CiteScore** (0-100 + A-D grade) and a one-line **pre-submission conclusion**
+(arXiv has banned authors over hallucinated references since 2026-05; ICML
+2026 desk-rejects them too).
+
+**Mechanical layer (the script)**: claim↔registry title/year/journal/author
+consistency; nine machine-readable error codes on every judgment (v3.9);
+**clone-pair detection** (v3.10 — same title under different DOIs, or one DOI
+carrying different titles, flagged in pairs: the most common fabrication shape
+in generated text); **cross-lingual title bridging** (v3.10 — a Chinese
+original title claimed against an English registry record is resolved via the
+bilingual `original-title` field, the DOI landing page, or OpenAlex; a hit
+upgrades to `verified`, a miss keeps `partial`, and a language difference is
+never treated as fabrication evidence); retraction checks (Crossref online, or
+instantly offline via an optional local Retraction Watch index
+`--retraction-cache`); Wayback archive links attached to dead links; arXiv
+landing-page fallback keeps verdicts deterministic when its API flakes;
+parallel verification (`--workers`, default 4) plus a local disk cache
+(default on, 7-day TTL) make repeat runs cheap and verdicts stable. Behind a
+firewall: `--proxy http://host:port`, `--cn` (resilient preset: 25s floor +
+Crossref re-source), or `--preflight` to see registry status before the batch;
+when 3+ registries fail at transport level the run flips to degraded-network
+mode — fast, honest skips instead of minutes of waiting.
+
+**Semantic layer (the model)**: decompose each cited claim into atomic
+claim-triplets (subject–relation–object, RefChecker style) BEFORE judging,
+then verify each triplet against the source — granularity moves from
+paragraph to triple, so "which half-sentence is wrong" becomes answerable.
+Register the verdict structurally so it becomes auditable workpaper, not a
+feeling:
 `"semantic": {"claim": "...", "support": "supported|partial|not_in_source|
 contradicted|unclear", "quote": "...", "note": "..."}`. The verifier carries
 it into `--export auditjson` and a report section; `not_in_source` /
 `contradicted` cap the mechanical verdict at `partial` with a human-review
 flag — a source that exists is not a source that agrees.
 
-**Mechanical (run the script)**:
-
-```bash
-python scripts/verify_refs.py --refs research_refs.json --out verify_report.md
-# Got a .bib from Zotero/EndNote? Feed it directly (v1.9):
-python scripts/verify_refs.py --refs bibliography.bib --out report.md
-```
-
-Five verdicts: `verified` / `partial` / `unreachable` (needs_human_check) /
-`invalid` / `unverified`. References may carry `url`, `doi`, `pmid`, or
-`arxiv`; every identifier is cross-checked against its official registry
-(DOI.org metadata, NCBI E-utilities for PMID, export.arxiv.org for arXiv), so
-fabricated IDs are judged `invalid` — never silently `unreachable`. Every
-report opens with a **CiteScore** (0-100 + A-D grade) and a **pre-submission
-conclusion** (v1.9: "can this go into a submission?" in one line — arXiv has
-banned authors over hallucinated references since 2026-05; ICML 2026
-desk-rejects them too). If the arXiv API itself flakes (406/403 — its anti-bot
-window trips even under polite pacing), v1.11 falls back to the official
-arxiv.org/abs landing page for title comparison, so verdicts stay
-deterministic across re-runs.
-
-Useful flags (details in `references/verification-details.md`):
-`--easy` (auto medical profile + auto exports), `--profile medical`,
-`--format html` (self-contained shareable report), `--export bibtex,csv,auditjson`
-(verified-only bibliography / audit ledger / per-reference check trail),
-`--offline` (structure only, caps at `partial`), `--strict` (CI exit codes),
-`--mailto you@lab.edu` (Crossref polite pool — fewer rate limits),
-`--openalex-key` / `--s2-key` (API keys; env `OPENALEX_API_KEY` / `S2_API_KEY`).
-Agents that prefer tools over skills can run the bundled MCP server
-(`mcp/server.py`, FastMCP) exposing three primitives: tools `verify_references`
-and `explain_verdict` (plain-language verdict explanations), resources
-(capability matrix, changelog), and a `fact_check_workflow` prompt template.
-arXiv multi-version references are flagged (unversioned citations to
-multi-revision papers, stale version pointers). Every report now opens with a
-**BLUF dual-reader header** — a machine-parseable YAML block (verdict /
-key_numbers / blocker / next_action) plus a 5-line human TL;DR — defining the
-"3-second readable" report standard. Verified DOIs gain a scholarly-reception
-section (Semantic Scholar citation contexts, coverage honestly labeled), and
-an L4 evidence cascade (v3.1: wired into the main flow) escalates semantically
-unresolved references (not_in_source/unclear) to official full text or PubMed
-abstract, retrieves passages (bge-m3 via local ollama, TF-IDF fallback) and asks
-a configurable external judge (OpenAI-compatible /v1 or native ollama with
-thinking-mode handling) — judge findings are recorded as notes and never flip
-verdicts (conservative by design; zero network calls without --judge-url). Optional `NCBI_API_KEY`
-raises E-utilities throughput from 3 to 10 req/s for parallel batches.
-An optional NLI third vote (`--nli-url`, independent service) watches the judge panel: agreement raises confidence, disagreement marks the reference for human review - validated to lift REFUTES F1 from 0 to 0.63 on SciFact-Open. Retracted papers are flagged via Crossref online, or instantly and offline via an optional local Retraction Watch index (`--retraction-cache`, built from the official Crossref GitLab dump, 63k+ DOIs). JSON reports now carry the BLUF block as a first-class object (conformant with the published BLUF Report Specification v1.0; the YAML text is kept as `bluf_yaml` for compatibility). Repeat runs reuse prior verdicts from a local disk cache (default on, 7-day TTL,
-`~/.cache/cite-holmes/`; `--no-cache` / `--refresh-cache` / `--cache-ttl` to
-tune; `--strict` always bypasses it). Behind a firewall? Pass `--proxy
-http://host:port` (or set `HTTPS_PROXY`) — one honest fast pass beats minutes
-of waiting. References are verified in parallel (`--workers`, default 4) — a 20-item
-bibliography takes roughly a quarter of the serial time; use `--workers 1`
-when strict request pacing matters more than speed.
-
-**Multi-source confirmation**: beyond the registries, since v1.8 verified
-titles get an OpenAlex bibliographic cross-check (and DOI references whose
-DOI.org metadata could not be fetched get a Semantic Scholar second
-confirmation since v1.9; references with no DOI/PMID/arXiv at all also get a
-Semantic Scholar title-search confirmation since v1.10) — confirmation only,
+**Multi-source confirmation**: verified titles get an OpenAlex bibliographic
+cross-check; DOI references whose registry metadata could not be fetched get
+a Semantic Scholar second confirmation; references with no DOI/PMID/arXiv at
+all get a Semantic Scholar title-search confirmation — confirmation only,
 never a downgrade: databases have coverage gaps, "not found" ≠ fabricated.
-Since v1.8, retracted papers are flagged via the Crossref/Retraction Watch API
-and capped at `partial` with human-review flags. Unreachable links get a
-Wayback Machine archive link attached automatically. A host-level circuit
-breaker (v1.6) skips a host after 2 consecutive transport failures instead of
-stalling the batch; when 3+ different hosts fail at the transport layer in one
-run (restricted-egress signature, common behind national firewalls), v1.10
-flips to a degraded-network mode that fast-skips remaining lookups with an
-honest note and a one-line fix suggestion (configure a proxy / retry later) —
-a fast honest answer instead of minutes of waiting. Duplicate DOI/URL entries
-within one run reuse the first verification (cache, marked in the note).
+
+**Task → flag** (details in `references/verification-details.md`):
+
+| Task | Flags |
+|---|---|
+| Medical topics | `--easy` (auto medical + exports) · `--profile medical` |
+| Share / archive | `--format html` (self-contained single file) |
+| Export | `--export bibtex,gbt7714,ris,csv,auditjson` |
+| CI | `--strict` · `--offline` (structure only, caps at `partial`) |
+| Polite pacing | `--mailto you@lab.edu` |
+| API keys | `--openalex-key` / `--s2-key` / `--ncbi-key` (env of same name) |
+| Weak network | `--proxy` · `--cn` · `--preflight` · `--timeout` |
+| Cache | `--no-cache` / `--refresh-cache` / `--cache-ttl` |
+| Self-check | `--doctor` (add `--net` for registry probes) |
+| External judging | `--judge-url` / `--nli-url` / `--fast-judge-url` (notes only, never flip verdicts) |
+| MCP server | `mcp/server.py` — tools `verify_references` / `explain_verdict` / `check_document`, resources (capability matrix, changelog), `fact_check_workflow` prompt |
 
 **Offline mode (`--offline`)**: structure checks only — honesty first, never
 awards `verified`.

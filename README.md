@@ -213,6 +213,20 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.10.0** — cross-lingual titles & clone detection: a Chinese original
+  title claimed against an English registry record (the normal case for
+  Chinese-journal DOIs) is now resolved by a three-stage bridge — the
+  bilingual `original-title` registry field, then the DOI landing page, then
+  OpenAlex — a hit upgrades the verdict to `verified`, a miss keeps
+  `partial`, and a language difference is never treated as fabrication
+  evidence. **Clone-pair detection** flags same-title/different-DOI and
+  same-DOI/different-title pairs inside one bibliography (the most common
+  fabrication shape in generated text) as pairs — a lead for review, never a
+  verdict change. `--doctor` (add `--net`) gives a zero-outbound environment
+  self-check with per-registry connectivity probes, PASS/WARN/FAIL verdicts
+  and CI-friendly exit codes. The SKILL VERIFY section is restructured
+  command-first (run → verdicts → mechanical/semantic layers → task→flag
+  table). 355 tests green.
 - **v3.9.0** — structured error codes + escalation routing: every result now
   carries machine-readable `error_codes` (E_DOU_NOT_FOUND / E_TITLE_MISMATCH /
   E_RETRACTED / E_STITCHED / E_UNREACHABLE / ... — five verdicts plus the

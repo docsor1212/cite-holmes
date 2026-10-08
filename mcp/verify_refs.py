@@ -61,7 +61,7 @@ Semantic Scholar 标题检索确认（无 DOI/PMID/arXiv 引用的第三路正�
 不降级；query 连字符空格化——S2 官方文档确认连字符查询无结果）；批内结果缓存
 （同 DOI/URL 二次出现复用判定，不重复外呼）；降级态快速失败（传输失败不再重试）。
 v1.12：持久磁盘缓存（--cache 默认开，sqlite3 标准库存 ~/.cache/cite-holmes/，TTL 默认
-168h——复跑不再出国，直攻评测 T 维；--strict 强制绕过保 CI 诚实；--refresh-cache
+168h——复跑不再出国、判定口径一致；--strict 强制绕过保 CI 诚实；--refresh-cache
 强制重验）；--proxy 显式代理；能力矩阵新增「不支持输入」行；包内私有工具清除。
 """
 
@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.9.0"
+VERSION = "3.10.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -102,13 +102,13 @@ def _ncbi_qs(extra: str = "") -> str:
 
 # ---------------- 主机断路器（v1.6，国内适配主攻）+ 全局网络降级（v1.10） ----------------
 # 同一主机连续 _CB_THRESHOLD 次传输层失败（超时/连接重置/DNS 解析失败）→ 本批次内
-# 跳过该主机的后续外呼并诚实备注，避免断网环境整批卡死（评测："需要等网络响应"）。
+# 跳过该主机的后续外呼并诚实备注，避免断网环境整批卡死（弱网痛点：等待网络响应的时间不可控）。
 # HTTP 层失败（404/403/429 等站点有响应的情况）不触发熔断。main() 每次运行重置。
 # v1.10 并行验证引入 _CB_LOCK：_cb_record 的「累计→熔断」是读改写序列，多 worker
 # 并发下必须串行化（CPython dict 单操作原子不覆盖 check-then-act）。
 # v1.10 全局网络降级：批内 ≥_NET_DEGRADE_THRESHOLD 个「不同主机」传输层失败 →
 # 判定出海受限，未确认过成功的主机全部快速跳过（诚实备注+建议），不再逐主机烧超时
-# ——评测 T 维失分点「国内网络偶有卡顿」的机制层缓解：等很久 → 快速结论。
+# ——受限网络下「等很久」的机制层缓解：一次快速诚实的通过胜过几分钟干等。
 _CB_THRESHOLD = 2
 _CB = {}
 _CB_LOCK = threading.Lock()
@@ -339,6 +339,8 @@ def capability_matrix() -> dict:
             "DOI↔PMID 拼接（两键各真但指向不同论文）", "期刊名不符", "作者名不符",
             "真实但已撤稿（Crossref/Retraction Watch 撤稿库）",
             "死链/不可达（自动附 Wayback 存档对照）", "重复引用（URL/DOI/PMID 三键去重）",
+            "中文原题 vs 登记英文题名（v3.10 跨语言三级桥接核验）",
+            "克隆引用对（v3.10 同题不同 DOI / 同 DOI 不同题，成对警示）",
         ],
         "semantic": [
             "指向真实、可信页面的精心伪造——内容是否真支撑论断由模型的语义层判断"
@@ -453,6 +455,123 @@ def normalize_url(url: str) -> str:
 
 
 PUBMED_URL_RE = re.compile(r"^https?://pubmed\.ncbi\.nlm\.nih\.gov/(\d+)/?$")
+
+
+def _cjk_norm(s: str) -> str:
+    """v3.10 中英混排标题归一化：全角→半角、去空白与标点、小写，仅保留
+    字母数字与 CJK 表意文字。跨语言桥接比对与克隆引用检测共用——中文文献
+    引用中全角标点/空格变体极常见，不归一会把同一题名误判成两个。"""
+    out = []
+    for ch in str(s or "").lower():
+        o = ord(ch)
+        if 0xFF01 <= o <= 0xFF5E:      # 全角 ASCII 区 → 半角
+            ch = chr(o - 0xFEE0)
+        elif ch == "\u3000":           # 全角空格
+            continue
+        if ch.isalnum() or "\u4e00" <= ch <= "\u9fff":
+            out.append(ch)
+    return "".join(out)
+
+
+def _cross_lingual_bridge(doi: str, claimed: str, meta: dict,
+                          timeout: float) -> str:
+    """v3.10 跨语言标题桥接核验（只补证据、只升不降）：中文期刊常在 Crossref
+    登记英文题名而用户引用中文原题，跨语言相似度天然低——v3.0 守卫此时一律
+    转 partial 人工核对。本函数依次尝试三级桥接，任一命中即返回一致注记
+    （调用方升级 verified），全部未命中返回空串（维持 partial 转人工）。
+      T1 零网络：Crossref 双语记录的 original-title 字段（常存原语言题名）
+      T2 落地页：DOI 资源页的 citation_title/og:title，或页面全文命中中文原题
+      T3 OpenAlex：display_name 常为原语言题名（无 key 403 静默跳过）
+    设计铁律：网络失败一律静默——「桥接不通」绝不能变成「编造依据」；
+    阈值 0.75 为归一化后中文题名比对的保守下限（全半角/标点已归一）。"""
+    cn = _cjk_norm(claimed)
+    if len(cn) < 6:
+        return ""
+    ot = meta.get("original-title")
+    ot = (ot[0] if isinstance(ot, list) and ot else ot) or ""
+    if ot:
+        r = difflib.SequenceMatcher(None, cn, _cjk_norm(ot)).ratio()
+        if r >= 0.75:
+            return f"双语记录 original-title 核验一致（相似度 {r:.2f}）"
+    res_url = (((meta.get("resource") or {}).get("primary") or {})
+               .get("URL")) or f"https://doi.org/{doi}"
+    # 安全门（审计 A1/A2 修复）：注册库/出版商自控 URL——
+    # ① scheme 白名单（file: 等 hostname 为空的方案在 ssrf_blocked 放行，须显式拦）；
+    # ② 禁自动重定向，手动逐跳跟随并对每一跳重查 SSRF 字面量——
+    #    否则落地页 302 到内网地址会被默认 opener 照常跟随（盲 SSRF）。
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+
+    def _fetch_landing(url):
+        """手动逐跳抓取落地页（≤3 跳），每跳过 scheme+SSRF 双门，返回 HTML 或 None。
+        断路器接线（审计 A3）：主机连续传输失败时本批跳过，与全局外呼同规。"""
+        for _hop in range(4):
+            if not str(url).lower().startswith(("http://", "https://")):
+                return None
+            if ssrf_blocked(url) or _cb_open(url):
+                return None
+            try:
+                req = urllib.request.Request(url, headers={
+                    "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{VERSION})"})
+                opener = urllib.request.build_opener(_NoRedirect)
+                with opener.open(req, timeout=timeout) as resp:
+                    html = resp.read(262144).decode("utf-8", "ignore")
+                _cb_record(url, False)
+                return html
+            except urllib.error.HTTPError as e:
+                _cb_record(url, False)  # 站点有响应：不计传输失败
+                loc = e.headers.get("Location") if e.headers else None
+                if e.code in (301, 302, 303, 307, 308) and loc:
+                    url = urllib.request.urljoin(url, loc)
+                    continue
+                return None
+            except Exception:
+                _cb_record(url, True)
+                return None
+        return None
+
+    html = _fetch_landing(res_url)
+    if html:
+        m = (re.search(r'<meta[^>]+name="citation_title"[^>]+content="([^"]+)"',
+                       html, re.I)
+             or re.search(r'<meta[^>]+content="([^"]+)"[^>]+name="citation_title"',
+                          html, re.I)
+             or re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"',
+                          html, re.I))
+        if m:
+            r = difflib.SequenceMatcher(None, cn, _cjk_norm(m.group(1))).ratio()
+            if r >= 0.75:
+                return f"DOI 落地页题名核验一致（相似度 {r:.2f}）"
+        # 审计 A6 收紧：整页子串命中只认 <head> 区（<title>+meta）——正文区
+        # （如攻击者自己论文的参考文献表）出现该题名不构成「同载」证据。
+        head_m = re.search(r"<head[^>]*>(.*?)</head>", html, re.I | re.S)
+        ttl_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
+        head_zone = _cjk_norm((head_m.group(1) if head_m else "")
+                              + (ttl_m.group(1) if ttl_m else ""))
+        if cn in head_zone:
+            return "DOI 落地页同载声称中文原题（双语页命中）"
+    if len(cn) >= 12 and (_OPTS.get("openalex_key") or ""):
+        try:
+            q = quote(claimed.strip(), safe="")
+            url = (f"https://api.openalex.org/works?search={q}&per-page=1"
+                   f"&select=display_name&api_key={quote(_OPTS['openalex_key'], safe='')}")
+            if _cb_open(url):
+                return ""
+            req = urllib.request.Request(url, headers={
+                "User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                _cb_record(url, False)
+                hits = (json.loads(resp.read().decode("utf-8", "ignore"))
+                        or {}).get("results") or []
+            if hits:
+                r = difflib.SequenceMatcher(
+                    None, cn, _cjk_norm(hits[0].get("display_name"))).ratio()
+                if r >= 0.75:
+                    return f"OpenAlex 原语言题名核验一致（相似度 {r:.2f}）"
+        except Exception:
+            pass
+    return ""
 
 
 def doi_metadata_match(doi: str, title: str, year, timeout: float,
@@ -620,10 +739,22 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
     def _has_cjk(t):
         return any("\u4e00" <= c <= "\u9fff" for c in str(t or ""))
     # v3.0.0 跨语言守卫：中文声称 vs 英文登记（或反之）相似度天然低——
-    # 跨语言不可比不判 invalid,降 partial 转人工(与期刊名核查同款守卫)
+    # 跨语言不可比不判 invalid。v3.10 升级：先走三级桥接核验（original-title
+    # 双语记录/落地页/OpenAlex 原语言题名），命中升 verified；未命中维持
+    # partial 转人工（守卫方向不变：跨语言永远不构成编造依据）。
     if title and sim < 0.50 and (_has_cjk(title) != _has_cjk(meta_title)):
+        bridge = _cross_lingual_bridge(doi, title, meta, timeout)
+        if bridge:
+            # 审计 B1 修复：桥接只解决「标题跨语言不可比」，期刊/作者不符信号
+            # 必须原样透出——桥接命中≠整条引用干净，jadj/aadj 参与最终 adjust，
+            # jnote/anote 拼回 note（与下方常规路径同款拼接）。
+            # 契约:adjust ∈ {"", "partial", "invalid"}——一致=空串(verify_one 视为无调整)
+            return (jadj or aadj), (f"DOI 元数据核验一致（跨语言桥接：{bridge}；"
+                                    f"登记题名《{str(meta_title)[:60]}》）{jnote}{anote}"
+                                    ), True, csl
         return "partial", (f"跨语言标题无法机器比对（声称中文/登记英文或反之,相似度 "
-                           f"{sim:.2f} 不作编造依据）→ 建议人工核对"), True, csl
+                           f"{sim:.2f}；桥接核验未命中）{jnote}{anote}"
+                           f"→ 建议人工核对"), True, csl
     if title and sim < 0.50:
         return "invalid", (f"DOI 元数据标题相似度仅 {sim:.2f} → DOI 指向的不是这篇论文，"
                            f"疑似编造或错引（DOI 实际为《{str(meta_title)[:60]}》）"), True, csl
@@ -2104,7 +2235,7 @@ def _cache_key(ref: dict) -> tuple:
     return ()
 
 
-# ---------------- 持久磁盘缓存（v1.12：复跑不出国——直攻评测 T 维） ----------------
+# ---------------- 持久磁盘缓存（v1.12：复跑不出国，判定口径一致） ----------------
 # ~/.cache/cite-holmes/cache.sqlite3（标准库 sqlite3）。键=影响判定的全部输入字段
 # （同 DOI 不同声称标题/年份必须分开——标题相似度判定依赖声称值）+ 验证器版本 + 预设。
 # 只缓存稳定判定 verified/partial/invalid；unreachable（瞬态）与 offline 结果不缓存。
@@ -2409,9 +2540,10 @@ def _dc_put(path: str, key: str, result: dict) -> None:
 
 def _dup_title_sig(r: dict) -> str:
     """v3.4 去重指纹:引用行的归一化标题(小写去非字母数字)。
-    同标识符+同标题=真重复;同标识符+不同标题=T2/T7 型拼接变体,须独立判定。"""
-    import re as _re
-    return _re.sub(r"[^a-z0-9]+", "", str(r.get("title") or r.get("claim") or "").lower())[:120]
+    同标识符+同标题=真重复;同标识符+不同标题=T2/T7 型拼接变体,须独立判定。
+    审计 B3 修复:归一改走 _cjk_norm(保留 CJK)——旧 [^a-z0-9] 归一会把纯中文
+    标题折成空串,导致「异题同 DOI」的两条中文引用被误并成真重复。"""
+    return _cjk_norm(r.get("title") or r.get("claim") or "")[:120]
 
 
 def mark_duplicates(results: list) -> None:
@@ -2435,6 +2567,76 @@ def mark_duplicates(results: list) -> None:
         else:
             for _, v in keys:
                 seen[v] = r["index"]
+
+
+def _clone_pairs_scan(results: list) -> list:
+    """v3.10 克隆引用对扫描（纯函数，零网络）：返回 [{a, b, kind}]。
+      R1「同题不同 DOI」：同一真论文被写成多个 DOI 变体——克隆引用，
+        至少一个标识为编造/错引（LLM 生成文本最常见的伪造形态之一）。
+      R2「同 DOI 不同题」：拼接变体——两键各真但组合造假的前兆形态，
+        mark_duplicates 已对其实行独立核验（v3.4 指纹），此处补成对警示。
+    不改变五态判定：克隆对是高价值线索而非定罪证据，最终以元数据核验为准。
+    归一比对走 _cjk_norm（中英同规）；长度差+quick_ratio 预筛控制 O(n²)
+    常数（千条清单为秒级）——审计 B2 披露：预筛只作用于 R1；同 DOI 对
+    豁免预筛（R2 无相似度下限，完全不同的标题也要走 R2 判定），预筛
+    砍掉的 R2 粗端由 doi_metadata_match 的标题比对兜住。"""
+    import difflib as _d
+    pairs = []
+    items = []
+    for r in results:
+        t = _cjk_norm(r.get("title") or r.get("claim") or "")
+        items.append((r, t))
+    n = len(items)
+    for i in range(n):
+        ra, ta = items[i]
+        if len(ta) < 8:
+            continue
+        da = (ra.get("doi") or "").lower()
+        for j in range(i + 1, n):
+            rb, tb = items[j]
+            db = (rb.get("doi") or "").lower()
+            same_doi = bool(da) and da == db
+            if len(tb) < 8 or abs(len(ta) - len(tb)) > max(len(ta), len(tb)) * 0.35:
+                continue
+            sm = _d.SequenceMatcher(None, ta, tb)
+            # 审计 B2:预筛只作用于 R1;同 DOI 对豁免(R2 无相似度下限)
+            if not same_doi and sm.quick_ratio() < 0.85:
+                continue
+            sim = sm.ratio()
+            if sim >= 0.92 and da and db and da != db:
+                pairs.append({"a": ra["index"], "b": rb["index"], "kind": "clone_doi",
+                              "sim": round(sim, 2)})
+            elif da and da == db and sim < 0.92:
+                pairs.append({"a": ra["index"], "b": rb["index"], "kind": "clone_title",
+                              "sim": round(sim, 2)})
+    return pairs
+
+
+def detect_clone_pairs(results: list) -> int:
+    """v3.10 克隆引用搭档检测（主流程调用一次）：扫描克隆对并为双方追加
+    警示注记。判定不改——注记明确「以元数据核验为准」。返回克隆对数。"""
+    zh = {"clone_doi": "同题不同 DOI（克隆引用：至少一个标识为编造或错引）",
+          "clone_title": "同 DOI 不同标题（拼接变体警示：判定已各自独立核验）"}
+    seen_pairs = set()
+    cnt = 0
+    for p in _clone_pairs_scan(results):
+        key = (p["a"], p["b"], p["kind"])
+        if key in seen_pairs:
+            continue
+        seen_pairs.add(key)
+        ra = next(r for r in results if r["index"] == p["a"])
+        rb = next(r for r in results if r["index"] == p["b"])
+        note = f"克隆引用对 #{p['a']}↔#{p['b']}：{zh[p['kind']]}（相似度 {p['sim']}）→ 以元数据核验为准"
+        for r in (ra, rb):
+            r["note"] = (r["note"] + "；" if r.get("note") else "") + note
+        cnt += 1
+    return cnt
+
+
+def collect_clone_pairs(results: list) -> list:
+    """v3.10 渲染层只读收集（不写 note——detect_clone_pairs 已写过，渲染
+    时重算只为取结构化列表，纯函数幂等零成本）。"""
+    return _clone_pairs_scan(results)
 
 
 VERDICT_ZH = {"verified": "✅ verified", "partial": "🟡 partial", "unreachable": "⚠️ unreachable",
@@ -2963,6 +3165,15 @@ def render_md(results: list, offline: bool, profile: str = "general",
                 lines.append(f"- ⚠️ {c['marker']} 锚词率 {c['anchor_rate']}"
                              f"（疑似错配引文：引文句与被引标题内容词重叠过低）→ 人工复核")
         lines += ["", "- 锚词率低≠错引：是语义层人工复核候选（句子是否真被支撑由模型判定）"]
+    _pairs = collect_clone_pairs(results)  # v3.10 克隆引用对区块（有对才出现）
+    if _pairs:
+        lines += ["", "## 克隆引用对（同题不同 DOI / 同 DOI 不同题）", ""]
+        for p in _pairs:
+            kind = ("同一标题挂多个不同 DOI——至少一个标识为编造或错引"
+                    if p["kind"] == "clone_doi" else
+                    "同一 DOI 挂不同标题——拼接变体，两条判定已各自独立核验")
+            lines.append(f"- #{p['a']} ↔ #{p['b']}（相似度 {p['sim']}）：{kind}；以元数据核验为准")
+        lines.append("")
     # v3.7.0 求星合规铺设:交付物尾注(每报告一次,低调一行;家族任务 10-06)
     lines += ["", "> 本文档由 cite-holmes 生成（[GitHub](https://github.com/docsor1212/cite-holmes) · "
               "[SkillHub](https://skillhub.cn/skills/indiv-sorsor/cite-holmes)）· 觉得有用欢迎 Star / 收藏", ""]
@@ -3075,6 +3286,19 @@ def render_html(results: list, offline: bool, profile: str = "general",
                          f"锚词不足 {context_check['n_low_anchor']}（阈值 {context_check['anchor_threshold']}）。"
                          "锚词率低≠错引，是语义层人工复核候选。</p><ul>"
                          + "".join(rows_cc) + "</ul></div>")
+    _pairs = collect_clone_pairs(results)  # v3.10 克隆引用对区块（有对才出现）
+    clone_html_block = ""
+    if _pairs:
+        rows_cl = []
+        for p in _pairs:
+            kind = ("同一标题挂多个不同 DOI——至少一个标识为编造或错引"
+                    if p["kind"] == "clone_doi" else
+                    "同一 DOI 挂不同标题——拼接变体，两条判定已各自独立核验")
+            rows_cl.append(f"<li>#{p['a']} ↔ #{p['b']}（相似度 {p['sim']}）：{kind}；以元数据核验为准</li>")
+        clone_html_block = ("<div style='margin-top:20px;padding:12px;border:1px solid #f0d9d9;"
+                            "border-radius:6px;background:#fffafa;'>"
+                            "<h3 style='margin:0 0 8px 0;'>克隆引用对（同题不同 DOI / 同 DOI 不同题）</h3>"
+                            "<ul>" + "".join(rows_cl) + "</ul></div>")
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -3122,10 +3346,100 @@ border-top:1px solid #d8d2c4;padding-top:8px}}
 <footer>语义验证（来源是否支持论断）由模型完成，本报告只覆盖机械层；
 指向真实可信页面的精心伪造仍需人工判断。cite-holmes · Cite Holmes</footer>
 {cc_html_block}
+{clone_html_block}
 <footer style="margin-top:24px;padding-top:12px;border-top:1px solid #eee;color:#9aa0a6;font-size:12px;text-align:center;">
 本文档由 cite-holmes 生成 · <a href="https://github.com/docsor1212/cite-holmes" style="color:#9aa0a6;">GitHub</a> · <a href="https://skillhub.cn/skills/indiv-sorsor/cite-holmes" style="color:#9aa0a6;">SkillHub</a> · 觉得有用欢迎 Star / 收藏
 </footer>
 </body></html>"""
+
+
+_DOCTOR_PROBES = [
+    ("DOI.org 解析", "https://doi.org/10.3866/PKU.WHXB201112303"),
+    ("Crossref API", "https://api.crossref.org/works?rows=0&mailto=doctor%40cite-holmes"),
+    ("PubMed E-utilities", "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+                           "esearch.fcgi?db=pubmed&retmode=json&retmax=0&term=cite+holmes+doctor"),
+    ("arXiv API", "https://export.arxiv.org/api/query?search_query=all:cite&max_results=1"),
+    ("OpenAlex", "https://api.openalex.org/works?per-page=1&select=id"),
+    ("Semantic Scholar", "https://api.semanticscholar.org/graph/v1/paper/"
+                         "DOI:10.3866/PKU.WHXB201112303?fields=title"),
+    ("Wayback 存档", "https://archive.org/wayback/available?url=example.com"),
+]
+
+
+def run_doctor(net: bool = False, timeout: float = 6.0,
+               cache_path: str = "") -> int:
+    """v3.10 --doctor 环境自检：先做零外呼体检（版本/缓存目录/配置键/运行
+    形态），--net 时加测各学术注册库连通性与延迟。三态 PASS/WARN/FAIL；
+    FAIL 存在退出码 1（可入 CI 健康门）。doctor 只诊断不治疗——修复建议
+    给到操作层，绝不静默改配置。"""
+    checks = []  # (name, status, detail)
+    checks.append(("引擎版本", "PASS",
+                   f"verify_refs.py v{VERSION} · Python {sys.version.split()[0]}"))
+    # 缓存目录可写（持久缓存 v1.12 的唯一落盘依赖；写失败会静默停用——doctor 把它显性化）
+    cp = os.path.expanduser(cache_path or "~/.cache/cite-holmes/cache.sqlite3")
+    try:
+        os.makedirs(os.path.dirname(cp), exist_ok=True)
+        probe = cp + ".doctor_probe"
+        with open(probe, "w") as f:
+            f.write("ok")
+        os.remove(probe)
+        checks.append(("缓存目录", "PASS", os.path.dirname(cp)))
+    except Exception as e:
+        checks.append(("缓存目录", "WARN",
+                       f"不可写（{type(e).__name__}）——持久缓存将静默停用，复跑会全量外呼"))
+    # 配置键状态（只报状态不改行为；键值绝不回显）
+    env_keys = [("OPENALEX_API_KEY", "OpenAlex（2026 起生产调用需 key，无 key 每日 100 credits）"),
+                ("NCBI_API_KEY", "PubMed E-utilities（无 key 3 req/s 限速）"),
+                ("S2_API_KEY", "Semantic Scholar（无 key 共享池限流）"),
+                ("CITE_HOLMES_PROXY", "代理"), ("ALL_PROXY", "系统代理")]
+    for env, desc in env_keys:
+        v = os.environ.get(env)
+        if v:
+            checks.append(("配置键", "INFO", f"{env} 已设置（{desc}）"))
+        else:
+            checks.append(("配置键", "INFO", f"{env} 未设置——{desc}"))
+    # 输出编码形态（Windows GBK 控制台历史故障面）
+    enc = getattr(sys.stdout, "encoding", "") or ""
+    checks.append(("输出编码", "PASS" if enc.lower().replace("-", "") == "utf8" else "INFO",
+                   f"stdout={enc or '未知'}（非 UTF-8 控制台下特殊字符按 replace 降级显示）"))
+    if net:
+        print("── 注册库连通性探针（--net）──")
+        for name, url in _DOCTOR_PROBES:
+            t0 = time.time()
+            status, detail = "FAIL", ""
+            try:
+                req = urllib.request.Request(url, headers={
+                    "User-Agent": f"cite-holmes/{VERSION}; +doctor"})
+                with urllib.request.urlopen(req, timeout=timeout) as resp:
+                    code = resp.code
+                ms = (time.time() - t0) * 1000
+                if code == 200:
+                    status = "PASS" if ms <= 2000 else "WARN"
+                    detail = f"HTTP 200 · {ms:.0f}ms" + ("" if ms <= 2000 else "（慢>2s）")
+                else:
+                    status, detail = "WARN", f"HTTP {code} · {ms:.0f}ms"
+            except urllib.error.HTTPError as e:
+                ms = (time.time() - t0) * 1000
+                if e.code in (403, 429):
+                    status, detail = "WARN", f"HTTP {e.code}（可达但限流/需 key）· {ms:.0f}ms"
+                else:
+                    status, detail = "WARN", f"HTTP {e.code} · {ms:.0f}ms"
+            except Exception as e:
+                detail = f"{type(e).__name__}（不可达/超时 {timeout}s）——该源核验将走降级路径"
+            checks.append((f"探针·{name}", status, detail))
+    n_fail = sum(1 for _, s, _ in checks if s == "FAIL")
+    n_warn = sum(1 for _, s, _ in checks if s == "WARN")
+    print("== cite-holmes doctor ==")
+    for name, s, detail in checks:
+        mark = {"PASS": "✅", "WARN": "⚠️ ", "INFO": "ℹ️ ", "FAIL": "❌"}[s]
+        print(f"  {mark} [{s:4s}] {name}: {detail}")
+    if n_fail:
+        print(f"verdict: FAIL（{n_fail} 项 FAIL / {n_warn} 项 WARN）——先修复 FAIL 再跑批")
+    elif n_warn:
+        print(f"verdict: usable with caveats（{n_warn} 项 WARN）——可跑批，注意降级提示")
+    else:
+        print("verdict: all clear——环境就绪，可直接跑批")
+    return 1 if n_fail else 0
 
 
 def main() -> int:
@@ -3147,6 +3461,11 @@ def main() -> int:
     ap.add_argument("--preflight", action="store_true",
                     help="v3.7.0 注册库预检面板:核验前探测各官方源可达性(3s 超时),"
                          "弱网环境先看状态再跑批")
+    ap.add_argument("--doctor", action="store_true",
+                    help="v3.10 环境自检：零外呼体检（版本/缓存/配置/文件形态），"
+                         "配合 --net 加测各学术注册库连通性与延迟；FAIL 存在时退出码 1")
+    ap.add_argument("--net", action="store_true",
+                    help="--doctor 配套：加测注册库连通性探针（单独使用无效果）")
     ap.add_argument("--cn", action="store_true",
                     help="CN 韧性预设(v3.6)：超时下限 25s；DOI.org 三试全败时回源 "
                          "api.crossref.org 同构 CSL(独立主机)；其余逻辑不变")
@@ -3204,6 +3523,10 @@ def main() -> int:
                     help="显式 HTTP(S) 代理地址（如 http://127.0.0.1:7890）；"
                           "不指定时自动遵循 HTTP_PROXY/HTTPS_PROXY 环境变量")
     args = ap.parse_args()
+    if getattr(args, "doctor", False):
+        return run_doctor(net=getattr(args, "net", False),
+                          timeout=min(args.timeout, 8.0),
+                          cache_path=args.cache_path)
     medical = args.profile == "medical"
     _net_reset()  # 断路器+全局网络降级状态按批次重置（v1.6/v1.10）
     if args.proxy.strip():
@@ -3337,7 +3660,7 @@ def main() -> int:
                 time.sleep(args.interval)
     else:
         # v1.10 引用级并行验证：条与条相互独立（共享状态仅断路器/限速器，均已加锁），
-        # 整批耗时约 ÷workers——直攻评测 T 维「跨国数据库验证慢」。进度行按完成顺序
+        # 整批耗时约 ÷workers——跨国数据库验证慢的机制层缓解。进度行按完成顺序
         # 打印（带真实序号），最终结果按 index 有序回填，报告/JSON 顺序与串行一致。
         # 并行下不做逐条 interval（并发本身就是节流；单主机礼貌由断路器+限速锁保证）。
 
@@ -3391,6 +3714,9 @@ def main() -> int:
                   "部分外呼已快速跳过——建议配置代理/更换网络后重跑以获得更完整结果")
 
     mark_duplicates(results)
+    _n_clone = detect_clone_pairs(results)  # v3.10 克隆引用搭档检测（只注记不改判定）
+    if _n_clone:
+        print(f"[clone] 克隆引用对 {_n_clone} 组（同题不同 DOI / 同 DOI 不同题）——详见报告克隆引用对区块")
     apply_semantic_cap(results)  # v1.11：语义否定判定封顶（在去重后统一执行）
     for _r in results:  # v3.9.0 结构化错误码(errorHandling):五态之上的机器可读细分
         try:

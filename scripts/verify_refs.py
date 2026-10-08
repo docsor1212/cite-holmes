@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.8.0"
+VERSION = "3.9.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -1917,7 +1917,50 @@ def apply_l4_cascade(results: list, timeout: float) -> None:
     verified，不动 invalid）；未配置 --judge-url 时零网络调用零行为变化（审核安全）。"""
     if not judge_endpoint_available():
         return
+    # v3.9.0 位 B(fastjudge_design 落地):--fast-judge-url 时先对学生模型预筛
+    # (GPU ~24ms/条),按「高置信 REFUTES 优先」排序后再做贵的官方文本升级——
+    # 排序路由不跳过任何条目(诚实:总核验量不变,变的是处理次序与可观测性)。
+    def _fj_prefilter(r):
+        if not (_OPTS.get("fast_judge_url") or "").strip():
+            return 0  # 无预筛:保持原顺序
+        sa = r.get("semantic_audit") or {}
+        claim = str(sa.get("claim") or "").strip()
+        src = "\n".join(x for x in (str(r.get("title") or ""),
+                                    str(r.get("journal") or "")) if x.strip())
+        if not claim or len(src.strip()) < 20:
+            return 0
+        fj = fast_judge_vote(claim, src, timeout=timeout)
+        r.setdefault("checks", {})["fast_judge_prescreen"] = {
+            "label": fj.get("label"), "prob": fj.get("prob")}
+        if fj.get("label") == "REFUTES" and float(fj.get("prob") or 0) >= 0.95:
+            return 2  # 高置信反驳:疑似错引,升级复核优先级最高
+        return 1
+
+    cands = []
     for r in results:
+        try:
+            sa = r.get("semantic_audit") or {}
+            if sa.get("support") not in ("not_in_source", "unclear"):
+                continue
+            claim = str(sa.get("claim") or "").strip()
+            if not claim or r.get("verdict") == "invalid":
+                continue
+            pmid = str(r.get("pmid") or "").strip()
+            m = re.search(r"(\d{4}\.\d{4,5})(?:v\d+)?", str(r.get("arxiv") or ""))
+            if not ((pmid and PMID_RE.match(pmid)) or m):
+                continue
+            cands.append((_fj_prefilter(r), r))
+        except Exception as e:
+            try:
+                r.setdefault("checks", {})["l4_evidence_cascade"] = {
+                    "degraded": f"cascade-error:{type(e).__name__}"}
+            except Exception:
+                pass
+    cands.sort(key=lambda t: -t[0])
+    if any(p == 2 for p, _ in cands):
+        n_hi = sum(1 for p, _ in cands if p == 2)
+        print(f"[L4] fast-judge 预筛:{n_hi} 条疑似错引置前复核")
+    for _prio, r in cands:
         try:
             sa = r.get("semantic_audit") or {}
             if sa.get("support") not in ("not_in_source", "unclear"):
@@ -2536,6 +2579,56 @@ def check_document(text: str, results: list, anchor_threshold: float = 0.34) -> 
             "anchor_threshold": anchor_threshold,
             "note": ("锚词率=引文句与被引标题的内容词重叠(阈值 %.2f);low≠错引,"
                      "是语义层人工复核候选" % anchor_threshold)}
+
+
+# ═══ v3.9.0 结构化错误码(errorHandling):五态之上的机器可读细分 ═══
+
+def derive_error_codes(r: dict) -> list:
+    """从单条 result 的 checks/note 派生结构化错误码(纯函数,零网络)。
+    码表(稳定契约,MCP/脚本可依赖):
+      E_DOU_NOT_FOUND   DOI 在 DOI.org 不存在(404)——编造引用
+      E_TITLE_MISMATCH  DOI 存在但登记标题与声称不符——错引/张冠李戴
+      E_CROSS_LANG      跨语言标题不可比——降 partial 转人工
+      E_ARXIV_NOT_FOUND arXiv ID 官方 API 查无
+      E_PMID_NOT_FOUND  PMID E-utilities 查无
+      E_STITCHED        DOI/PMID 拼接(两键各真但指向不同论文)
+      E_RETRACTED       已撤稿(Crossref/Retraction Watch)
+      E_AUTHOR_MISMATCH 作者姓氏与登记不符
+      E_JOURNAL_MISMATCH 期刊名与登记不符
+      E_UNREACHABLE     来源抓取失败(超时/反爬/网络)——不等于不存在
+      E_OFFLINE         离线模式未核验
+    无问题返回 [](空=没有可断言的错误信号,不等于"证明正确")。"""
+    codes = []
+    v = r.get("verdict")
+    c = r.get("checks") or {}
+    note = r.get("note") or ""
+    doi_m = c.get("doi_metadata") or {}
+    if "DOI 在 DOI.org 不存在" in note or (doi_m.get("matched") is False
+                                          and "404" in note and r.get("doi")):
+        codes.append("E_DOU_NOT_FOUND")
+    elif "疑似编造或错引" in note or doi_m.get("adjust") == "invalid":
+        codes.append("E_TITLE_MISMATCH")
+    if "跨语言" in note:
+        codes.append("E_CROSS_LANG")
+    if "拼接" in note:
+        codes.append("E_STITCHED")
+    ax = c.get("arxiv_metadata") or {}
+    if ax.get("matched") is False and r.get("arxiv"):
+        codes.append("E_ARXIV_NOT_FOUND")
+    if "E-utilities 查无" in note or ("E-utilities" in note and r.get("pmid")
+                                      and v == "invalid"):
+        codes.append("E_PMID_NOT_FOUND")
+    if (c.get("retraction") or {}).get("retracted"):
+        codes.append("E_RETRACTED")
+    if "作者" in note and ("不符" in note or "不一致" in note):
+        codes.append("E_AUTHOR_MISMATCH")
+    if "期刊名不符" in note or "期刊" in note and "不符" in note:
+        codes.append("E_JOURNAL_MISMATCH")
+    if v == "unreachable":
+        codes.append("E_UNREACHABLE")
+    if r.get("note") and "offline" in str(r.get("note", "")).lower():
+        codes.append("E_OFFLINE")
+    return codes
 
 
 def main_with_check_document(args, results, text_path):
@@ -3299,6 +3392,11 @@ def main() -> int:
 
     mark_duplicates(results)
     apply_semantic_cap(results)  # v1.11：语义否定判定封顶（在去重后统一执行）
+    for _r in results:  # v3.9.0 结构化错误码(errorHandling):五态之上的机器可读细分
+        try:
+            _r["error_codes"] = derive_error_codes(_r)
+        except Exception:
+            _r["error_codes"] = []
     apply_l4_cascade(results, args.timeout)  # v3.1：L4 证据升级级联（--judge-url 时激活；零配置零变化）
     apply_fast_judge(results, args.timeout)  # v3.5.0：fast-judge 预筛（--fast-judge-url 时激活；零配置零变化）
     scorecard = compute_scorecard(results)

@@ -56,7 +56,25 @@ def _clip(obj, limit=_CLIP_STR):
     return obj
 
 
-def verify_references_impl(claims: list, timeout: float = 15.0) -> dict:
+def _clip_count(obj, limit):
+    """返回截断后对象与被截断字段数(与 _clip 同构但计数,供截断语义化透出)。"""
+    n = 0
+    def walk(o):
+        nonlocal n
+        if isinstance(o, str):
+            if len(o) > limit:
+                n += 1
+            return o if len(o) <= limit else o[:limit] + f"…[+{len(o) - limit} chars]"
+        if isinstance(o, list):
+            return [walk(x) for x in o]
+        if isinstance(o, dict):
+            return {k: walk(v) for k, v in o.items()}
+        return o
+    return walk(obj), n
+
+
+def verify_references_impl(claims: list, timeout: float = 15.0,
+                           max_field_chars: int = 800) -> dict:
     """机械验证一组引用(纯实现,无 MCP 依赖)。
 
     claims: [{"title": str, "url"?: str, "doi"?: str, "pmid"?: str,
@@ -87,7 +105,15 @@ def verify_references_impl(claims: list, timeout: float = 15.0) -> dict:
     vr.mark_duplicates(results)
     vr.apply_semantic_cap(results)
     sc = vr.compute_scorecard(results)
-    return _clip({"version": vr.VERSION, "scorecard": sc, "results": results})
+    out = {"version": vr.VERSION, "scorecard": sc, "results": results}
+    if max_field_chars and max_field_chars > 0:
+        out, clipped = _clip_count(out, max_field_chars)
+        if clipped:
+            # v3.9.0 截断语义化:不静默丢信息——标记截断并指路完整明细
+            out["output_clipped"] = {
+                "clipped_fields": clipped, "limit": max_field_chars,
+                "hint": "长字段已截断;完整逐项明细用 CLI --export auditjson 获取"}
+    return out
 
 
 def explain_verdict_impl(result: dict) -> dict:
@@ -155,7 +181,8 @@ if _MCP_OK:
     mcp = FastMCP("cite-holmes")
 
     @mcp.tool
-    def verify_references(claims: list, timeout: float = 15.0) -> str:
+    def verify_references(claims: list, timeout: float = 15.0,
+                          max_field_chars: int = 800) -> str:
         """Verify a list of references for hallucinated/fabricated citations.
 
         Each claim object: {"title": str (required), "url"/"doi"/"pmid"/"arxiv": str (optional),
@@ -163,7 +190,7 @@ if _MCP_OK:
         verified / partial / unreachable / invalid. Pure mechanical verification against
         official registries (DOI.org, PubMed E-utilities, arXiv, Crossref/Retraction Watch);
         no API keys required, no telemetry."""
-        return json.dumps(verify_references_impl(claims, timeout),
+        return json.dumps(verify_references_impl(claims, timeout, max_field_chars),
                           ensure_ascii=False, indent=1)
 
     @mcp.tool

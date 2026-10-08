@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 3.8.0
+version: 3.9.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -16,6 +16,11 @@ description: >-
   detection). Medical evidence mode (Cochrane/BMJ/ClinicalTrials/ChiCTR/NMPA/
   CDC/NICE/Wanfang presets, PMID existence check via NCBI E-utilities) and
   verified-bibliography export (BibTeX + audit CSV + JSON workpaper) built in.
+  Trigger matching: the trigger phrases above match by semantic similarity, not
+  exact string. Short requests like "verify this" may mis-trigger — just state
+  your real intent; mis-triggers have no side effects. To keep a class of
+  requests from triggering this skill, avoid combining research/verification
+  words with a reference list.
 when_to_use: >-
   Use when the user says "deep research", "look into", "investigate",
   "compare A vs B", "fact check", "verify this claim", "is it true that...",

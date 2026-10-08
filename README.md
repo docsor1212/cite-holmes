@@ -213,6 +213,15 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.9.0** — structured error codes + escalation routing: every result now
+  carries machine-readable `error_codes` (E_DOU_NOT_FOUND / E_TITLE_MISMATCH /
+  E_RETRACTED / E_STITCHED / E_UNREACHABLE / ... — five verdicts plus the
+  reason class, derivable offline); the L4 evidence cascade gains a **fast-judge
+  pre-screen route** (with `--fast-judge-url`, suspected mis-citations flagged
+  by the 322M student are escalated first — routing, not skipping: every
+  candidate is still fully cascaded); MCP `verify_references` clipping is now
+  explicit (`max_field_chars` parameter + `output_clipped` marker when fields
+  are shortened — no silent truncation). 306 tests green.
 - **v3.8.0** — documentation & examples completeness release: end-to-end worked example (input refs → real generated report →
   all four export formats, shipped under `examples/end-to-end/`);
   `references/INDEX.md` + consolidated anti-patterns list (incl. "trigger-word

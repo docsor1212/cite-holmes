@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.10.0"
+VERSION = "3.11.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -341,6 +341,8 @@ def capability_matrix() -> dict:
             "死链/不可达（自动附 Wayback 存档对照）", "重复引用（URL/DOI/PMID 三键去重）",
             "中文原题 vs 登记英文题名（v3.10 跨语言三级桥接核验）",
             "克隆引用对（v3.10 同题不同 DOI / 同 DOI 不同题，成对警示）",
+            "整批伪装指纹（v3.11 清单画像：标识符近邻簇/年份集中/信源集中，人工抽查建议）",
+            "预印本已正式发表未引用（v3.11 arXiv→期刊版 DOI 升级提示，注记级）",
         ],
         "semantic": [
             "指向真实、可信页面的精心伪造——内容是否真支撑论断由模型的语义层判断"
@@ -2639,6 +2641,196 @@ def collect_clone_pairs(results: list) -> list:
     return _clone_pairs_scan(results)
 
 
+# ═══ v3.11.0 清单画像与版本提示：从单条伪造到整批伪装 ═══
+
+def profile_bibliography(results: list) -> dict:
+    """v3.11 清单级伪造画像（纯本地，零网络）：LLM 批量编造参考文献表时
+    会留下统计指纹——标识符近号成簇、年份过度集中/超前、期刊过度集中。
+    逐条核验抓「单条伪造」，本画像抓「整批伪装」。画像只描述分布并给出
+    人工抽查建议，绝不改变任何单条判定（集中也可能是合法的专题综述）。
+    返回 {"flags": [{kind, detail}], "stats": {...}}；flags 为空=画像干净。"""
+    import datetime as _dt
+    flags, stats = [], {}
+    n = len(results)
+    if n < 4:
+        return {"flags": [], "stats": {"n": n, "skipped": "条目过少，画像不具统计意义"}}
+
+    # ① 标识符近邻簇：同前缀 DOI 的尾部数字段数值近邻（差 ≤2）成簇 ≥3 条
+    #    ——批量生成器的典型指纹；合法的连续页码/论文集编号同样会命中，
+    #    因此只给「人工抽查」建议，不判伪造。
+    clusters = {}
+    for r in results:
+        doi = str(r.get("doi") or "").lower()
+        m = re.match(r"^(10\.\d{4,9}/\S*?)(\d{3,})$", doi)
+        if not m:
+            continue
+        clusters.setdefault(m.group(1), []).append((int(m.group(2)), r["index"]))
+    seen_cluster = set()
+    for prefix, seqs in sorted(clusters.items()):
+        if len(seqs) < 3:
+            continue
+        seqs = sorted(seqs)
+        run = [seqs[0]]
+        best = []
+        for prev, cur in zip(seqs, seqs[1:]):
+            if cur[0] - prev[0] <= 2:
+                run.append(cur)
+            else:
+                best = max(best, run, key=len)
+                run = [cur]
+        best = max(best, run, key=len)
+        if len(best) >= 3:
+            key = (prefix, tuple(x[1] for x in best))
+            if key not in seen_cluster:
+                seen_cluster.add(key)
+                flags.append({
+                    "kind": "serial_cluster",
+                    "detail": (f"标识符近邻簇：{prefix}* 尾号 "
+                               f"{'、'.join(str(x[0]) for x in best[:6])}"
+                               f"{'…' if len(best) > 6 else ''} 共 {len(best)} 条连续"
+                               f"（条目 {'/'.join('#' + str(x[1]) for x in best[:6])}"
+                               f"{'…' if len(best) > 6 else ''}）——批量生成常见指纹，"
+                               "也可能是合法连续编号，建议逐条抽查该簇")})
+
+    # ② 年份画像：未来年份逐项注记 + 清单级过度集中
+    now_y = _dt.date.today().year
+    years = []
+    for r in results:
+        y = r.get("year")
+        try:
+            y = int(y)
+        except (TypeError, ValueError):
+            continue
+        years.append((y, r["index"]))
+    future = [(y, i) for y, i in years if y > now_y + 1]
+    if future:
+        flags.append({"kind": "future_year",
+                      "detail": f"声称年份超前当前时间（{'、'.join(f'{y}(#{i})' for y, i in future[:5])}"
+                                f"{'…' if len(future) > 5 else ''}）——尚未发生的文献年份，重点核查"})
+    if years:
+        ys = [y for y, _ in years]
+        from collections import Counter as _C
+        top_y, top_n = _C(ys).most_common(1)[0]
+        stats["year"] = {"min": min(ys), "max": max(ys),
+                         "mode": top_y, "mode_share": round(top_n / len(ys), 2)}
+        if len(ys) >= 8 and top_n / len(ys) >= 0.8:
+            flags.append({"kind": "year_concentration",
+                          "detail": f"{top_n}/{len(ys)} 条声称同年（{top_y}）——"
+                                    "综述专辑可能合法，但整批同年的参考文献表更像一次性生成，建议抽查"})
+
+    # ③ 期刊集中度：单一信源占比过高（合法专题综述 vs 编造窄源，两可→仅提示）
+    srcs = [str(r.get("source") or "").strip() for r in results]
+    srcs = [s for s in srcs if s]
+    if len(srcs) >= 8:
+        from collections import Counter as _C
+        top_s, top_n = _C(srcs).most_common(1)[0]
+        stats["source_top"] = {"name": top_s[:40], "share": round(top_n / len(srcs), 2)}
+        if top_n / len(srcs) >= 0.6:
+            flags.append({"kind": "source_concentration",
+                          "detail": f"{top_n}/{len(srcs)} 条同信源「{top_s[:40]}」（占比 "
+                                    f"{top_n/len(srcs):.0%}）——确认该刊是否真的承载这些论文"})
+
+    # ④ 标识符构成比：完全无标识符（doi/pmid/arxiv/url 全空）的条目占比
+    bare = [r["index"] for r in results
+            if not any((r.get(k) or "").strip() for k in ("doi", "pmid", "arxiv", "url"))]
+    stats["identifier_mix"] = {"bare": len(bare), "n": n,
+                               "bare_share": round(len(bare) / n, 2)}
+    if bare and len(bare) / n >= 0.5:
+        flags.append({"kind": "bare_refs",
+                      "detail": f"{len(bare)}/{n} 条无任何可机验标识符（DOI/PMID/arXiv/URL 均空）"
+                                f"（如 #{'、#'.join(str(x) for x in bare[:5])}…）——无法机械核验，"
+                                "建议补全标识符后重跑"})
+    return {"flags": flags, "stats": stats}
+
+
+def completeness_for_ref(ref: dict) -> dict:
+    """v3.11 逐条完整度评分（纯本地）：verified 条目能从注册库 CSL 回填多少
+    导出字段（作者/刊名/年份/卷/期/页）——GB/T 与 BibTeX 导出「宁缺毋错」的
+    下一代：不仅告诉你能不能导，还告诉你差哪些字段。评分口径：authors 30 /
+    container 20 / year 20 / volume·issue·page 各 10；csl 缺失（如非 DOI 源）
+    返回 score=None（未知≠零分）。只读不写。"""
+    csl = ((ref.get("checks") or {}).get("doi_metadata") or {}).get("csl") or {}
+    if not csl:
+        return {"score": None, "missing": [], "suggestion": ""}
+    have = {"authors": bool(csl.get("authors")),
+            "container": bool(csl.get("container")),
+            "year": bool(csl.get("year")),
+            "volume": bool(csl.get("volume")),
+            "issue": bool(csl.get("issue")),
+            "page": bool(csl.get("page"))}
+    weights = {"authors": 30, "container": 20, "year": 20,
+               "volume": 10, "issue": 10, "page": 10}
+    score = sum(w for k, w in weights.items() if have[k])
+    missing = [k for k, v in have.items() if not v]
+    zh = {"authors": "作者", "container": "刊名", "year": "年份",
+          "volume": "卷", "issue": "期", "page": "页码"}
+    sug = ""
+    if missing:
+        sug = ("注册库未登记：" + "、".join(zh[m] for m in missing)
+               + "——可对照原文补全后再导出（导出策略仍为宁缺毋错）")
+    return {"score": score, "missing": missing, "suggestion": sug}
+
+
+def annotate_completeness(results: list) -> int:
+    """v3.11 批处理接线：给 verified 且 csl 在场的条目写 completeness 字段。
+    返回有 completeness 的条数（JSON 报告逐条透出，md/html 不逐条展开）。"""
+    n = 0
+    for r in results:
+        if r.get("verdict") != "verified":
+            continue
+        c = completeness_for_ref(r)
+        if c["score"] is not None:
+            r["completeness"] = c
+            n += 1
+    return n
+
+
+def annotate_preprint_upgrades(results: list, timeout: float) -> int:
+    """v3.11 预印本→正式版提示（注记级，只增线索不改判定）：arXiv 引用
+    verified 且未带 DOI 时，经 Semantic Scholar 同记录 externalIds 查该
+    预印本是否已登记正式发表（期刊版 DOI/venue）——投稿场景引用预印本
+    常被审稿人挑，此提示帮作者在提交前完成版本升级。失败/限流一律静默
+    （S2 共享池限速走 _s2_rate_wait，断路器生效）；引用已带 DOI 则跳过。"""
+    n = 0
+    for r in results:
+        if r.get("verdict") != "verified":
+            continue
+        ax = str(r.get("arxiv") or "").strip()
+        if not ax or (r.get("doi") or "").strip():
+            continue
+        try:
+            url = (f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{quote(ax)}"
+                   f"?fields=externalIds,venue,year")
+            if _cb_open(url):
+                continue
+            _s2_rate_wait()
+            _hdrs = {"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"}
+            if _OPTS.get("s2_key"):
+                _hdrs["x-api-key"] = _OPTS["s2_key"]  # 与 s2_doi_confirm 同款头
+            req = urllib.request.Request(url, headers=_hdrs)
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                _cb_record(url, False)
+                d = json.loads(resp.read().decode("utf-8", "ignore"))
+            ext = d.get("externalIds") or {}
+            jdoi = str(ext.get("DOI") or "").strip()
+            venue = str(d.get("venue") or "").strip()
+            if jdoi:
+                venue = venue[:60]  # 截断外部数据:防超长与下游子串扫描误触发
+                r["note"] = ((r.get("note") + "；") if r.get("note") else "") + (
+                    f"该预印本已登记正式发表（{venue or '期刊版'}"
+                    f"{' ' + str(d.get('year')) if d.get('year') else ''}，"
+                    f"DOI:{jdoi}）——建议引用正式版（preprint→published 升级提示）")
+                n += 1
+        except urllib.error.HTTPError:
+            # 审计修复:HTTP 层失败（404 未收录/429 限流）不触发熔断——否则连续
+            # 2 条未收录 arXiv ID 会熔断 api.semanticscholar.org,殃及同主机的
+            # s2_doi_confirm 第二源确认（断路器契约:仅传输层失败计数）
+            _cb_record(url, False)
+        except Exception:
+            _cb_record(url, True)
+    return n
+
+
 VERDICT_ZH = {"verified": "✅ verified", "partial": "🟡 partial", "unreachable": "⚠️ unreachable",
               "invalid": "❌ invalid", "unverified": "⏸ unverified"}
 
@@ -3174,6 +3366,13 @@ def render_md(results: list, offline: bool, profile: str = "general",
                     "同一 DOI 挂不同标题——拼接变体，两条判定已各自独立核验")
             lines.append(f"- #{p['a']} ↔ #{p['b']}（相似度 {p['sim']}）：{kind}；以元数据核验为准")
         lines.append("")
+    _prof = profile_bibliography(results)  # v3.11 清单画像区块（有旗标才出现）
+    if _prof["flags"]:
+        lines += ["", "## 清单画像（批量伪造指纹筛查）", "",
+                  "> 逐条核验抓单条伪造，画像抓整批伪装——旗标是人工抽查建议，不是判定。"]
+        for f in _prof["flags"]:
+            lines.append(f"- **{f['kind']}**：{f['detail']}")
+        lines.append("")
     # v3.7.0 求星合规铺设:交付物尾注(每报告一次,低调一行;家族任务 10-06)
     lines += ["", "> 本文档由 cite-holmes 生成（[GitHub](https://github.com/docsor1212/cite-holmes) · "
               "[SkillHub](https://skillhub.cn/skills/indiv-sorsor/cite-holmes)）· 觉得有用欢迎 Star / 收藏", ""]
@@ -3299,6 +3498,15 @@ def render_html(results: list, offline: bool, profile: str = "general",
                             "border-radius:6px;background:#fffafa;'>"
                             "<h3 style='margin:0 0 8px 0;'>克隆引用对（同题不同 DOI / 同 DOI 不同题）</h3>"
                             "<ul>" + "".join(rows_cl) + "</ul></div>")
+    _prof = profile_bibliography(results)  # v3.11 清单画像区块（有旗标才出现）
+    prof_html_block = ""
+    if _prof["flags"]:
+        rows_pf = [f"<li><b>{f['kind']}</b>：{e(f['detail'])}</li>" for f in _prof["flags"]]
+        prof_html_block = ("<div style='margin-top:20px;padding:12px;border:1px solid #e5e5e5;"
+                           "border-radius:6px;'>"
+                           "<h3 style='margin:0 0 8px 0;'>清单画像（批量伪造指纹筛查）</h3>"
+                           "<p>逐条核验抓单条伪造，画像抓整批伪装——旗标是人工抽查建议，不是判定。</p>"
+                           "<ul>" + "".join(rows_pf) + "</ul></div>")
     return f"""<!doctype html>
 <html lang="zh-CN"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
@@ -3347,6 +3555,7 @@ border-top:1px solid #d8d2c4;padding-top:8px}}
 指向真实可信页面的精心伪造仍需人工判断。cite-holmes · Cite Holmes</footer>
 {cc_html_block}
 {clone_html_block}
+{prof_html_block}
 <footer style="margin-top:24px;padding-top:12px;border-top:1px solid #eee;color:#9aa0a6;font-size:12px;text-align:center;">
 本文档由 cite-holmes 生成 · <a href="https://github.com/docsor1212/cite-holmes" style="color:#9aa0a6;">GitHub</a> · <a href="https://skillhub.cn/skills/indiv-sorsor/cite-holmes" style="color:#9aa0a6;">SkillHub</a> · 觉得有用欢迎 Star / 收藏
 </footer>
@@ -3717,6 +3926,11 @@ def main() -> int:
     _n_clone = detect_clone_pairs(results)  # v3.10 克隆引用搭档检测（只注记不改判定）
     if _n_clone:
         print(f"[clone] 克隆引用对 {_n_clone} 组（同题不同 DOI / 同 DOI 不同题）——详见报告克隆引用对区块")
+    # v3.11 预印本→正式版提示（注记级;offline 显式零网络,不依赖跨函数不变量）
+    _n_preprint = 0 if args.offline else annotate_preprint_upgrades(results, args.timeout)
+    if _n_preprint:
+        print(f"[preprint] {_n_preprint} 条预印本已登记正式发表——建议引用正式版（详见各条注记）")
+    annotate_completeness(results)  # v3.11 逐条完整度（JSON 字段）
     apply_semantic_cap(results)  # v1.11：语义否定判定封顶（在去重后统一执行）
     for _r in results:  # v3.9.0 结构化错误码(errorHandling):五态之上的机器可读细分
         try:
@@ -3740,7 +3954,8 @@ def main() -> int:
     _json_doc = {"version": VERSION, "profile": args.profile, "offline": args.offline,
                  "bluf": render_bluf_dict(results, scorecard),  # v3.2.0 规范 L1:对象
                  "bluf_yaml": render_bluf(results, scorecard),  # 兼容:YAML 文本
-                 "scorecard": scorecard, "results": results}
+                 "scorecard": scorecard, "results": results,
+                 "bibliography_profile": profile_bibliography(results)}  # v3.11 清单画像
     if cd is not None:
         _json_doc["context_check"] = cd
     with open(json_path, "w", encoding="utf-8") as f:

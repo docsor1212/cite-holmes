@@ -1,6 +1,6 @@
 [project]
 name = "cite-holmes-mcp"
-version = "2.2.0"
+version = "2.3.0"
 description = "cite-holmes MCP server — mechanical citation verification (DOI/PMID/arXiv/URL) with three MCP primitives (tools/resources/prompts); zero keys, zero telemetry"
 readme = "README.md"
 requires-python = ">=3.10"

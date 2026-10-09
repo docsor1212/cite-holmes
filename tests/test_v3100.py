@@ -303,7 +303,7 @@ class TestDoctor(unittest.TestCase):
             code = vr.run_doctor(net=False)
         out = buf.getvalue()
         self.assertEqual(code, 0)
-        self.assertIn("verify_refs.py v3.10.0", out)
+        self.assertIn("verify_refs.py v3.11.0", out)
         self.assertIn("verdict: all clear", out)
         self.assertNotIn("探针", out)  # 零外呼:无探针段
 
@@ -352,12 +352,12 @@ class TestCapabilityAndDocs(unittest.TestCase):
         self.assertTrue(any("克隆引用对" in x for x in cap["caught"]))
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "3.10.0")
+        self.assertEqual(vr.VERSION, "3.11.0")
 
     def test_skill_md_version_and_doctor(self):
         p = os.path.join(HERE, "..", "SKILL.md")
         t = open(p, encoding="utf-8").read()
-        self.assertIn("version: 3.10.0", t)
+        self.assertIn("version: 3.11.0", t)
         self.assertIn("--doctor", t)
         self.assertIn("cross-lingual title bridging", t.lower())
         self.assertIn("clone-pair detection", t.lower())

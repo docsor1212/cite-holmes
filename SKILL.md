@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 3.10.0
+version: 3.11.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -122,6 +122,15 @@ never treated as fabrication evidence); retraction checks (Crossref online, or
 instantly offline via an optional local Retraction Watch index
 `--retraction-cache`); Wayback archive links attached to dead links; arXiv
 landing-page fallback keeps verdicts deterministic when its API flakes;
+**Bibliography profiling** (v3.11 — batch-fabrication
+fingerprints across the whole list: serial identifier clusters, year
+over-concentration or future years, single-source concentration, bare-entry
+share; flags are human-review leads, never verdicts); **preprint→published
+hints** (v3.11 — an arXiv-only reference that has since been registered as a
+journal article gets annotated with the formal-version DOI, via Semantic
+Scholar, silent on rate limits); per-reference **completeness scoring**
+(v3.11 — how many export fields the registry CSL can back-fill, with the
+missing-field list for authors deciding what to complete before export).
 parallel verification (`--workers`, default 4) plus a local disk cache
 (default on, 7-day TTL) make repeat runs cheap and verdicts stable. Behind a
 firewall: `--proxy http://host:port`, `--cn` (resilient preset: 25s floor +

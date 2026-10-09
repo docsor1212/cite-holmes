@@ -213,6 +213,17 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.11.0** — bibliography profiling & version hints: a list-level
+  fabrication fingerprint scan (pure-local, zero network) catches what
+  per-reference checks cannot — serial identifier clusters, year
+  over-concentration or future years, single-source concentration, and the
+  bare-entry share; flags are human-review leads, never verdicts. An
+  arXiv-only reference that has since been registered as a journal article
+  gets a preprint→published hint (formal-version DOI via Semantic Scholar,
+  silent on rate limits). Verified DOI entries now carry a per-reference
+  **completeness score** — how many export fields the registry CSL can
+  back-fill, with the missing-field list, so authors know exactly what to
+  complete before exporting. 379 tests green.
 - **v3.10.0** — cross-lingual titles & clone detection: a Chinese original
   title claimed against an English registry record (the normal case for
   Chinese-journal DOIs) is now resolved by a three-stage bridge — the

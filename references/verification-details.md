@@ -1,5 +1,8 @@
 # Verification details (v1.10)
 
+> **30 秒入口**：何时读我——想弄懂某个判定为什么是 partial/invalid、或要配 --judge-url/--nli-url 等进阶旗标时。最短路径：先看「五态判定」表 + `--explain N`（CLI 直接人话解释单条，v3.12）再决定要不要深读本篇。回 [INDEX.md](INDEX.md)。
+
+
 Full semantics of every check `verify_refs.py` performs. SKILL.md keeps the
 short version; this file is the complete reference.
 

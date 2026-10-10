@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.11.0"
+VERSION = "3.12.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -3575,6 +3575,81 @@ _DOCTOR_PROBES = [
 ]
 
 
+# v3.12 --explain:错误码人话翻译表(与 derive_error_codes 码表一一对应)
+_ERR_CODE_ZH = {
+    "E_DOU_NOT_FOUND": "DOI 在 DOI.org 不存在（404）——疑似编造引用",
+    "E_TITLE_MISMATCH": "DOI 存在但登记标题与声称不符——错引或张冠李戴",
+    "E_CROSS_LANG": "跨语言标题无法机器比对——已保守处理，建议人工核对",
+    "E_ARXIV_NOT_FOUND": "arXiv ID 官方 API 查无",
+    "E_PMID_NOT_FOUND": "PMID 在 PubMed E-utilities 查无",
+    "E_STITCHED": "标识符拼接嫌疑（两键各真但疑似指向不同论文）",
+    "E_RETRACTED": "命中撤稿记录（Crossref/Retraction Watch）",
+    "E_AUTHOR_MISMATCH": "作者姓氏与登记列表不符",
+    "E_JOURNAL_MISMATCH": "期刊名与登记不符",
+    "E_UNREACHABLE": "来源抓取失败（超时/反爬/网络）——不等于不存在",
+    "E_OFFLINE": "离线模式未执行核验",
+}
+
+
+def explain_ref(r: dict) -> str:
+    """v3.12 单条判定链人话解释（--explain N）：判定语义 → 依据步骤 →
+    错误码翻译 → 注记要点 → 完整度 → 建议动作。纯静态，零网络；
+    与 MCP explain_verdict 同源语义（本版为 CLI 超集：含错误码/克隆对/
+    预印本/完整度等 v3.10+ 新信号）。"""
+    v = r.get("verdict")
+    base = {
+        "verified": ("来源存在、处于权威层级、字段完整，且通过官方注册库交叉核验",
+                     "可支撑正文结论；引用时保留原始链接与判定时间"),
+        "partial": ("来源可达但存在降级因素（社区层级/字段缺失/元数据存疑/撤稿/语义否定）",
+                    "降级使用：正文引用注明保留意见，或先人工复核再升级"),
+        "unreachable": ("本次抓取失败（404/超时/反爬），不等于不存在",
+                        "先开报告附带的 Wayback 存档链对照；关键来源反复失败则更换信源"),
+        "invalid": ("标识符不存在、指向错误论文或拼接伪造——机械层确凿判死",
+                    "不得引用；从清单删除或更换信源"),
+        "unverified": ("未执行检查（离线模式或跳过）",
+                       "联网环境重跑以获得真实判定"),
+    }.get(v)
+    if base is None:
+        return f"无法解释：未知判定 {v!r}"
+    why, action = base
+    lines = [f"== 第 {r.get('index')} 条：{str(r.get('title') or '')[:60]}",
+             f"判定：{v} —— {why}"]
+    steps = []
+    c = r.get("checks") or {}
+    dm = c.get("doi_metadata") or {}
+    if dm.get("matched"):
+        steps.append("DOI.org 注册元数据比对一致（标题/年份）")
+    elif r.get("doi") and dm:
+        steps.append("DOI.org 注册元数据未确认（获取失败或比对未通过）")
+    if (c.get("arxiv_metadata") or {}).get("matched"):
+        steps.append("arXiv 官方 API 元数据比对一致")
+    if (c.get("s2") or {}).get("matched"):
+        steps.append("Semantic Scholar 第三源交叉确认")
+    if (c.get("retraction") or {}).get("retracted"):
+        steps.append("⚠️ 撤稿库命中——见错误码")
+    if (c.get("openalex") or {}).get("confirmed"):
+        steps.append("OpenAlex 书目级存在性确认")
+    u = c.get("url") or {}
+    if u.get("reachable") is True:
+        steps.append(f"来源页可达（HTTP {u.get('status')}）")
+    if (c.get("wayback") or {}).get("archive_found"):
+        steps.append("Wayback 存档对照可用")
+    lines.append("依据：" + ("；".join(steps) if steps else "无可用检查记录（离线/跳过）"))
+    codes = r.get("error_codes") or derive_error_codes(r)
+    if codes:
+        zh = [_ERR_CODE_ZH.get(x, x) for x in codes]
+        lines.append("错误码：" + "；".join(f"{x}（{z}）" for x, z in zip(codes, zh)))
+    note = str(r.get("note") or "").strip()
+    if note:
+        lines.append("注记：" + (note[:300] + ("…" if len(note) > 300 else "")))
+    comp = r.get("completeness")
+    if isinstance(comp, dict) and comp.get("score") is not None:
+        extra = f"（缺：{'、'.join(comp['missing'])}）" if comp.get("missing") else ""
+        lines.append(f"导出完整度：{comp['score']}/100{extra}")
+    lines.append(f"建议：{action}")
+    return "\n".join(lines)
+
+
 def run_doctor(net: bool = False, timeout: float = 6.0,
                cache_path: str = "") -> int:
     """v3.10 --doctor 环境自检：先做零外呼体检（版本/缓存目录/配置键/运行
@@ -3670,6 +3745,13 @@ def main() -> int:
     ap.add_argument("--preflight", action="store_true",
                     help="v3.7.0 注册库预检面板:核验前探测各官方源可达性(3s 超时),"
                          "弱网环境先看状态再跑批")
+    ap.add_argument("--preset", choices=["submission"], default="",
+                    help="v3.12 场景预设：submission=投稿前参考文献终检"
+                         "（--strict 严格退出码 + --export gbt7714,bibtex,csv 组合，"
+                         "判定语义不变，只打包常用旗标）")
+    ap.add_argument("--explain", type=int, metavar="N", default=None,
+                    help="v3.12 跑批后对第 N 条输出判定链人话解释"
+                         "（判定语义/依据步骤/错误码/注记/完整度/建议动作）")
     ap.add_argument("--doctor", action="store_true",
                     help="v3.10 环境自检：零外呼体检（版本/缓存/配置/文件形态），"
                          "配合 --net 加测各学术注册库连通性与延迟；FAIL 存在时退出码 1")
@@ -3732,6 +3814,12 @@ def main() -> int:
                     help="显式 HTTP(S) 代理地址（如 http://127.0.0.1:7890）；"
                           "不指定时自动遵循 HTTP_PROXY/HTTPS_PROXY 环境变量")
     args = ap.parse_args()
+    if getattr(args, "preset", "") == "submission":  # v3.12 投稿终检预设:组合旗标不改判定语义
+        args.strict = True
+        args.export = args.export or "gbt7714,bibtex,csv"
+        print(f"[preset] submission：--strict + --export {args.export} 已组合"
+              "（投稿前一键终检；判定语义与默认模式完全一致。"
+              "注意 --strict 语义含绕过磁盘缓存读——复跑为全量外呼）")
     if getattr(args, "doctor", False):
         return run_doctor(net=getattr(args, "net", False),
                           timeout=min(args.timeout, 8.0),
@@ -3971,6 +4059,12 @@ def main() -> int:
         if cd["n_citations"] > 12:
             print(f"  …其余 {cd['n_citations'] - 12} 处见 JSON")
     print(f"CiteScore: {scorecard['score']}/100 ({scorecard['grade']} 级，{scorecard['total']} 条)")
+
+    if getattr(args, "explain", None) is not None:  # v3.12 单条判定链人话解释
+        target = next((r for r in results if r.get("index") == args.explain), None)
+        print()
+        print(explain_ref(target) if target else
+              f"第 {args.explain} 条不存在——有效范围 1-{len(results)}")
 
     if args.export:
         base = args.out.rsplit(".", 1)[0] if "." in args.out else args.out

@@ -11,3 +11,17 @@
 
 > 主文档：SKILL.md（技能定义）/ README.md（用户文档）。本目录文件按需加载，
 > 不进入主执行流。
+
+## 按任务 30 秒路由（v3.12）
+
+| 你要做什么 | 直接去 | 一行起步 |
+|---|---|---|
+| 快速核验一份引用清单 | 本页即可 | `python scripts/verify_refs.py --refs refs.json --out r.md` |
+| 投稿前最终把关 | faq.md「投稿前终检」 | `--preset submission` |
+| 看懂某条为什么这个判定 | verification-details.md + faq.md「--explain」 | `--explain 3` |
+| 医学/临床问题 | medical-mode.md | `--profile medical --easy` |
+| 写检索式/选信源 | search-strategies.md | 抄信源金字塔前三行 |
+| 正文引用与清单对不上 | faq.md「check-document」 | `--check-document paper.md` |
+| 出 GB·T 7714 / BibTeX 表 | faq.md「导出」 | `--export gbt7714,bibtex` |
+| 弱网/国内网络 | faq.md「国内网络」 | `--cn` 或 `--proxy` |
+| 遇到疑似误用 | anti-patterns.md | 通读一遍（每条带替代方案） |

@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 3.11.0
+version: 3.12.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -63,6 +63,9 @@ A question answerable by one verifiable fact → QUICK. Needs synthesis or
 trade-offs → FULL. "Quick check" forces QUICK; "thorough/comprehensive" forces
 FULL. When unsure, default FULL.
 
+Pre-submission bibliography final check skips this choice entirely: run
+`--preset submission` on the reference list (one flag = strict + exports).
+
 ## Five-phase workflow
 
 ### 1. CALIBRATE (FULL only)
@@ -111,7 +114,7 @@ judged `invalid` — never silently `unreachable`. Every report opens with a
 2026 desk-rejects them too).
 
 **Mechanical layer (the script)**: claim↔registry title/year/journal/author
-consistency; nine machine-readable error codes on every judgment (v3.9);
+consistency; 11 machine-readable error codes on every judgment (v3.9);
 **clone-pair detection** (v3.10 — same title under different DOIs, or one DOI
 carrying different titles, flagged in pairs: the most common fabrication shape
 in generated text); **cross-lingual title bridging** (v3.10 — a Chinese
@@ -169,6 +172,8 @@ never a downgrade: databases have coverage gaps, "not found" ≠ fabricated.
 | Weak network | `--proxy` · `--cn` · `--preflight` · `--timeout` |
 | Cache | `--no-cache` / `--refresh-cache` / `--cache-ttl` |
 | Self-check | `--doctor` (add `--net` for registry probes) |
+| Pre-submission final check | `--preset submission` (strict + GB·T/BibTeX/CSV exports in one flag) |
+| Explain one verdict | `--explain N` (plain-language chain: semantics / evidence / error codes / notes / completeness) |
 | External judging | `--judge-url` / `--nli-url` / `--fast-judge-url` (notes only, never flip verdicts) |
 | MCP server | `mcp/server.py` — tools `verify_references` / `explain_verdict` / `check_document`, resources (capability matrix, changelog), `fact_check_workflow` prompt |
 

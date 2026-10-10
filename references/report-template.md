@@ -1,5 +1,8 @@
 # 报告模板与引用 schema（SYNTHESIZE 阶段照此输出）
 
+> **30 秒入口**：何时读我——要写 research_refs.json 或组织最终报告时。最短路径：复制文末 JSON 骨架填字段；报告结构照 BLUF 头+表格+人工复核区三段即可。回 [INDEX.md](INDEX.md)。
+
+
 ## research_refs.json schema（VERIFY 阶段的输入）
 
 研究过程中实时登记引用，每条：

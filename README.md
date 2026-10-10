@@ -213,6 +213,17 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.12.0** — the submission workbench release: `--preset submission`
+  bundles the pre-submission final check into one flag (strict CI exit codes
+  + GB·T 7714/BibTeX/CSV exports; verdict semantics unchanged); `--explain N`
+  prints a plain-language explanation chain for any single reference
+  (verdict semantics / evidence steps / error-code translations / notes /
+  completeness / recommended action). Docs get a usability pass: every deep
+  reference now opens with a 30-second entry (when to read it, shortest
+  path), the anti-pattern list grew from 8 to 14 entries each with a
+  concrete alternative, the FAQ covers clone pairs / profiling / preprint
+  hints / bridging, and INDEX.md gained a task-based 30-second routing
+  table. 399 tests green.
 - **v3.11.0** — bibliography profiling & version hints: a list-level
   fabrication fingerprint scan (pure-local, zero network) catches what
   per-reference checks cannot — serial identifier clusters, year

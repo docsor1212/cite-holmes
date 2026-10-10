@@ -214,7 +214,7 @@ class TestPreprintUpgrades(unittest.TestCase):
 
 class TestVersionAndDocs(unittest.TestCase):
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "3.11.0")
+        self.assertEqual(vr.VERSION, "3.12.0")
 
     def test_capability_matrix_lists_new(self):
         cap = vr.capability_matrix()
@@ -223,7 +223,7 @@ class TestVersionAndDocs(unittest.TestCase):
 
     def test_skill_md_updated(self):
         t = open(os.path.join(HERE, "..", "SKILL.md"), encoding="utf-8").read()
-        self.assertIn("version: 3.11.0", t)
+        self.assertIn("version: 3.12.0", t)
         self.assertIn("bibliography profiling", t.lower())
         self.assertIn("preprint", t.lower())
 

@@ -28,7 +28,7 @@ class TestV300(unittest.TestCase):
                          "judge_url": "", "judge_model": "m"})
 
     def test_version_is_300(self):
-        self.assertEqual(vr.VERSION, "3.11.0")
+        self.assertEqual(vr.VERSION, "3.12.0")
 
     # ---- BLUF 双读者前置块 ----
 
@@ -37,7 +37,7 @@ class TestV300(unittest.TestCase):
         md = vr.render_md(rs, False)
         self.assertTrue(md.startswith("---\nverdict:"), "md 必须以 BLUF YAML 开头")
         for k in ("verdict:", "key_numbers:", "blocker:", "next_action:",
-                  "cite_holmes_version: 3.11.0"):
+                  "cite_holmes_version: 3.12.0"):
             self.assertIn(k, md.split("---")[1])
 
     def test_bluf_html_machine_readable(self):

@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 3.12.0
+version: 3.13.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -73,7 +73,11 @@ Pre-submission bibliography final check skips this choice entirely: run
 Ask 3–5 high-leverage questions at once (no drip-feeding): scope, timeframe,
 audience/depth, output format, decision context. Never re-ask what the user
 already provided. If the user declines ("your call"), proceed with stated
-defaults.
+defaults. Three calibration rules: order questions by dependency (only ask
+what becomes answerable after prior answers); **each question carries a
+recommended answer phrased so "yes" accepts it** (saying yes costs the user
+nothing); facts you can look up yourself never become questions — decisions
+always stay with the user.
 
 ### 2. PLAN
 
@@ -196,6 +200,9 @@ questions.
 | File | When |
 |---|---|
 | `scripts/verify_refs.py` | VERIFY phase mechanical check (pure stdlib, cross-platform, rate-limited) |
+| `references/GLOSSARY.md` | canonical terms (five verdicts / signals / error codes) with Avoid lists |
+| `references/out-of-scope.md` | explicit non-goals, each with a reason |
+| `docs/adr/` | architecture decision records (public layer) |
 | `mcp/server.py` | optional MCP server: expose `verify_references` as an MCP tool (FastMCP; same engine) |
 | `references/search-strategies.md` | read before SEARCH |
 | `references/report-template.md` | skeleton for SYNTHESIZE; refs schema |

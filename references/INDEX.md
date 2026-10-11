@@ -25,3 +25,5 @@
 | 出 GB·T 7714 / BibTeX 表 | faq.md「导出」 | `--export gbt7714,bibtex` |
 | 弱网/国内网络 | faq.md「国内网络」 | `--cn` 或 `--proxy` |
 | 遇到疑似误用 | anti-patterns.md | 通读一遍（每条带替代方案） |
+| 统一用词/报告语言对齐 | GLOSSARY.md | 正词表（五态/信号/错误码），带 Avoid 列表 |
+| 这事为什么不 做 | out-of-scope.md | 非目标档案，每条带理由 |

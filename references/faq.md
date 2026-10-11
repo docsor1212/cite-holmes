@@ -97,7 +97,7 @@ not_in_source / contradicted / unclear）。`not_in_source` 与 `contradicted`
 旧的字符串写法仍接受（仅注记）。
 
 ## Q: fast-judge 预筛会改我的判定吗？（v3.5.0）
-不会。`--fast-judge-url` 外挂的 322M 蒸馏分类器只对"语义待定且无官方文本可升级"
+不会。`--fast-judge-url` 外挂的小型分类器（任何 OpenAI 兼容 /v1 端点均可）只对"语义待定且无官方文本可升级"
 的引用追加「倾向支持（供人工参考）」注记——永不产生/修改五态判定，永不标记人工
 复核，默认关闭。校准曲线随仓库发布（阈值 0.95）。
 

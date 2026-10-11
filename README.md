@@ -213,6 +213,19 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.13.0** — methodology infrastructure release (borrowed from the
+  best-run open-source skills and adapted to citation verification):
+  `references/GLOSSARY.md` — an opinionated canonical-terms table (five
+  verdicts / signals / error codes), each term with an _Avoid_ list, so
+  report language and your language always line up; `docs/adr/` — public
+  architecture decision records (verdict contract, circuit-breaker scope,
+  offline honesty, cross-lingual guard, signals-never-verdicts, one-way
+  mirror, neutral language), each a short "what we decided and why";
+  `references/out-of-scope.md` — explicit non-goals, each with its reason;
+  a Codex-compatible `agents/openai.yaml`; and a CALIBRATE upgrade —
+  questions now carry recommended answers phrased so "yes" accepts them,
+  ordered by dependency, with decisions always left to you. 399 tests
+  green.
 - **v3.12.0** — the submission workbench release: `--preset submission`
   bundles the pre-submission final check into one flag (strict CI exit codes
   + GB·T 7714/BibTeX/CSV exports; verdict semantics unchanged); `--explain N`
@@ -223,7 +236,7 @@ or gate your CI on it (`--strict`).
   path), the anti-pattern list grew from 8 to 14 entries each with a
   concrete alternative, the FAQ covers clone pairs / profiling / preprint
   hints / bridging, and INDEX.md gained a task-based 30-second routing
-  table. 399 tests green.
+  table. 411 tests green.
 - **v3.11.0** — bibliography profiling & version hints: a list-level
   fabrication fingerprint scan (pure-local, zero network) catches what
   per-reference checks cannot — serial identifier clusters, year
@@ -254,7 +267,7 @@ or gate your CI on it (`--strict`).
   E_RETRACTED / E_STITCHED / E_UNREACHABLE / ... — five verdicts plus the
   reason class, derivable offline); the L4 evidence cascade gains a **fast-judge
   pre-screen route** (with `--fast-judge-url`, suspected mis-citations flagged
-  by the 322M student are escalated first — routing, not skipping: every
+  by the small student classifier are escalated first — routing, not skipping: every
   candidate is still fully cascaded); MCP `verify_references` clipping is now
   explicit (`max_field_chars` parameter + `output_clipped` marker when fields
   are shortened — no silent truncation). 306 tests green.
@@ -285,9 +298,9 @@ or gate your CI on it (`--strict`).
   checker). Anti-pattern guide + scenario best-practices docs. MCP server:
   batch cap 50, output clipping, packaged entry point (tag mcp-v2.0.0).
   292 tests green.
-- **v3.5.0** — fast-judge pre-screen (opt-in): point `--fast-judge-url` at a
-  [laya_service.py](https://github.com/docsor1212/cite-holmes) endpoint (322M
-  distilled classifier, ~24ms/item on GPU) and references stuck in
+- **v3.5.0** — fast-judge pre-screen (opt-in): point `--fast-judge-url` at
+  any OpenAI-compatible endpoint (a small local classifier works best —
+  smaller models keep latency low) and references stuck in
   semantic-limbo (no official text to escalate, no metadata to verify) get a
   screening note before a human ever looks at them. Guardrails by design: it
   NEVER produces or changes a verdict, never flags for review, and only

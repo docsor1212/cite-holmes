@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""v3.5.0 fast-judge 预筛测试(--fast-judge-url;laya_service.py 形态)
+"""v3.5.0 fast-judge 预筛测试(--fast-judge-url;外挂分类器)
 核心纪律:默认关=零行为变化;开=note-only 永不判定/永不设 needs_human_check;
 服务失败/无元数据/L4 已判定/invalid 全部弃权。"""
 import importlib.util, os, sys, unittest

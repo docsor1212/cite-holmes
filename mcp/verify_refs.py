@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.12.0"
+VERSION = "3.13.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -2051,7 +2051,7 @@ def apply_l4_cascade(results: list, timeout: float) -> None:
     if not judge_endpoint_available():
         return
     # v3.9.0 位 B(fastjudge_design 落地):--fast-judge-url 时先对学生模型预筛
-    # (GPU ~24ms/条),按「高置信 REFUTES 优先」排序后再做贵的官方文本升级——
+    # (小型分类器延迟极低),按「高置信 REFUTES 优先」排序后再做贵的官方文本升级——
     # 排序路由不跳过任何条目(诚实:总核验量不变,变的是处理次序与可观测性)。
     def _fj_prefilter(r):
         if not (_OPTS.get("fast_judge_url") or "").strip():
@@ -2155,7 +2155,7 @@ def apply_l4_cascade(results: list, timeout: float) -> None:
 
 
 def fast_judge_vote(claim: str, source: str, timeout: float = 30) -> dict:
-    """v3.5.0 fast-judge 预筛(LAYA 322M 学生模型,laya_service.py 形态)。
+    """v3.5.0 fast-judge 预筛(外挂小型分类器,OpenAI 兼容端点)。
     输入格式与训练一致(SENTENCE/SOURCE);失败/未配置返回 {"label": None}
     ——预筛层整体弃权,绝不影响主流程。"""
     url = _OPTS.get("fast_judge_url") or ""
@@ -2175,7 +2175,7 @@ def fast_judge_vote(claim: str, source: str, timeout: float = 30) -> dict:
 def apply_fast_judge(results: list, timeout: float) -> None:
     """v3.5.0 fast-judge 预筛(--fast-judge-url 时激活;零配置零变化):
     只服务「语义层待定(not_in_source/unclear)且 L4 级联没给出官方文本判定」的
-    条目——LAYA 学生模型对 claim×元数据底稿做预筛,高置信 SUPPORTS 仅追加供
+    条目——外挂学生分类器对 claim×元数据底稿做预筛,高置信 SUPPORTS 仅追加供
     人工参考的 note。永不产生/修改 verdict、永不设 needs_human_check
     (设计红线 fastjudge_design.md;阈值校准 calibration_fastjudge.json:
     SCitance v2.2 claim 级分组 dev,泄漏 0)。"""
@@ -3787,7 +3787,7 @@ def main() -> int:
     ap.add_argument("--nli-url", default="",
                     help="L2 NLI 第三票服务(nli_service.py;弃权式,分歧标人工复核不翻案)")
     ap.add_argument("--fast-judge-url", default="",
-                    help="fast-judge 预筛服务(laya_service.py;322M 学生模型——仅对语义"
+                    help="fast-judge 预筛服务(任何 OpenAI 兼容端点;小型分类器即可——仅对语义"
                          "待定且无官方文本可升级的条目做预筛,高置信 SUPPORTS 只加参考"
                          "note 永不判定;默认关闭)")
     ap.add_argument("--fast-judge-threshold", type=float, default=0.95,

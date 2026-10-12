@@ -213,6 +213,17 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.14.0** — the lean-main-file release: SKILL.md slimmed ~30% (294→207
+  lines EN / 249→176 ZH) by moving the anti-patterns catalog, the full
+  security declaration (`references/security.md`) and the honest limits (now
+  in `references/out-of-scope.md`) to their reference pages — the main file
+  keeps every command, the task→flag table and one-line summaries, so the
+  first read is short and the deep reads are opt-in. New `--grill
+  report.json`: an adversarial pre-submission checklist ("reviewer rehearsal")
+  that generates the strongest challenge questions per reference (per-verdict
+  templates + clone/profile/preprint follow-ups, pure templates, zero
+  network, never changes a verdict) so you answer every hard question before
+  a reviewer asks it. 424 tests green.
 - **v3.13.0** — methodology infrastructure release (borrowed from the
   best-run open-source skills and adapted to citation verification):
   `references/GLOSSARY.md` — an opinionated canonical-terms table (five

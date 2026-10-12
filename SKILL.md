@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 3.13.0
+version: 3.14.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -59,39 +59,33 @@ Three differences from a plain "search and summarize":
 | **QUICK** | Single fact-check: "is this claim true", "when was X released" | skipped | ≤6 | short report |
 | **FULL** | Open research: "state of X", "A vs B", "do a survey" | mandatory | ≤15 | full report |
 
-A question answerable by one verifiable fact → QUICK. Needs synthesis or
-trade-offs → FULL. "Quick check" forces QUICK; "thorough/comprehensive" forces
-FULL. When unsure, default FULL.
-
-Pre-submission bibliography final check skips this choice entirely: run
-`--preset submission` on the reference list (one flag = strict + exports).
+One verifiable fact → QUICK. Synthesis or trade-offs → FULL. "Quick check"
+forces QUICK; "thorough" forces FULL. Unsure → FULL. Pre-submission
+bibliography final check skips this choice: `--preset submission` (one flag =
+strict + GB·T/BibTeX/CSV exports).
 
 ## Five-phase workflow
 
 ### 1. CALIBRATE (FULL only)
 
-Ask 3–5 high-leverage questions at once (no drip-feeding): scope, timeframe,
-audience/depth, output format, decision context. Never re-ask what the user
-already provided. If the user declines ("your call"), proceed with stated
-defaults. Three calibration rules: order questions by dependency (only ask
-what becomes answerable after prior answers); **each question carries a
-recommended answer phrased so "yes" accepts it** (saying yes costs the user
-nothing); facts you can look up yourself never become questions — decisions
-always stay with the user.
+Ask 3–5 high-leverage questions at once: scope, timeframe, audience/depth,
+output format, decision context. Never re-ask what the user provided; if they
+decline, proceed with stated defaults. Three rules: order questions by dependency; **each carries a recommended answer phrased so "yes" accepts it**;
+facts you can look up yourself never become questions — decisions stay with
+the user.
 
 ### 2. PLAN
 
 Show a short plan: 3–7 sub-questions, source priority (primary/official >
 major media > community/blog as leads only), budget.
 
-### 3. SEARCH (iterative, not one pass)
+### 3. SEARCH (iterative)
 
-**Read `references/search-strategies.md` first** (diamond expansion, source
-pyramid, query matrix, gap-driven iteration). Essentials: each round targets
-one sub-question; evolve queries with discovered terms; search both English
-and Chinese for topics that span both internets; fetch full text of the 2–5
-most valuable sources (never conclude from search snippets); verify key
-numbers/dates in the original page before quoting.
+Read `references/search-strategies.md` first. Each round targets one
+sub-question; evolve queries with discovered terms; search both English and
+Chinese when the topic spans both; fetch full text of the 2–5 most valuable
+sources (never conclude from snippets); verify key numbers on the original
+page before quoting.
 
 ### 4. VERIFY (the heart of this skill)
 
@@ -100,192 +94,111 @@ Register every reference in `research_refs.json` (schema in
 
 ```bash
 python scripts/verify_refs.py --refs research_refs.json --out verify_report.md
-# Got a .bib from Zotero/EndNote? Feed it directly (v1.9):
+# Zotero/EndNote .bib feeds in directly:
 python scripts/verify_refs.py --refs bibliography.bib --out report.md
-# Environment self-check before a big batch (v3.10) — zero outbound calls
-# by default, add --net to probe every academic registry:
+# Big batch? Self-check first (zero outbound by default):
 python scripts/verify_refs.py --doctor --net
 ```
 
 Five verdicts: `verified` / `partial` / `unreachable` (needs_human_check) /
-`invalid` / `unverified`. Every identifier (`url` / `doi` / `pmid` / `arxiv`)
-is cross-checked against its official registry (DOI.org metadata, NCBI
-E-utilities for PMID, export.arxiv.org for arXiv), so fabricated IDs are
-judged `invalid` — never silently `unreachable`. Every report opens with a
-**BLUF dual-reader header** (machine-parseable YAML + 5-line human TL;DR), a
-**CiteScore** (0-100 + A-D grade) and a one-line **pre-submission conclusion**
-(arXiv has banned authors over hallucinated references since 2026-05; ICML
-2026 desk-rejects them too).
+`invalid` / `unverified`. Every identifier (`url`/`doi`/`pmid`/`arxiv`) is
+cross-checked against its official registry, so fabricated IDs are judged
+`invalid` — never silently `unreachable`. Every report opens with a **BLUF
+dual-reader header** + **CiteScore** (0-100 + A-D grade) + a one-line
+**pre-submission conclusion**.
 
-**Mechanical layer (the script)**: claim↔registry title/year/journal/author
-consistency; 11 machine-readable error codes on every judgment (v3.9);
-**clone-pair detection** (v3.10 — same title under different DOIs, or one DOI
-carrying different titles, flagged in pairs: the most common fabrication shape
-in generated text); **cross-lingual title bridging** (v3.10 — a Chinese
-original title claimed against an English registry record is resolved via the
-bilingual `original-title` field, the DOI landing page, or OpenAlex; a hit
-upgrades to `verified`, a miss keeps `partial`, and a language difference is
-never treated as fabrication evidence); retraction checks (Crossref online, or
-instantly offline via an optional local Retraction Watch index
-`--retraction-cache`); Wayback archive links attached to dead links; arXiv
-landing-page fallback keeps verdicts deterministic when its API flakes;
-**Bibliography profiling** (v3.11 — batch-fabrication
-fingerprints across the whole list: serial identifier clusters, year
-over-concentration or future years, single-source concentration, bare-entry
-share; flags are human-review leads, never verdicts); **preprint→published
-hints** (v3.11 — an arXiv-only reference that has since been registered as a
-journal article gets annotated with the formal-version DOI, via Semantic
-Scholar, silent on rate limits); per-reference **completeness scoring**
-(v3.11 — how many export fields the registry CSL can back-fill, with the
-missing-field list for authors deciding what to complete before export).
-parallel verification (`--workers`, default 4) plus a local disk cache
-(default on, 7-day TTL) make repeat runs cheap and verdicts stable. Behind a
-firewall: `--proxy http://host:port`, `--cn` (resilient preset: 25s floor +
-Crossref re-source), or `--preflight` to see registry status before the batch;
-when 3+ registries fail at transport level the run flips to degraded-network
-mode — fast, honest skips instead of minutes of waiting.
+**Mechanical layer (the script)** — claim↔registry title/year/journal/author
+consistency; 11 machine-readable error codes; **clone-pair detection** (same
+title under different DOIs, or one DOI with different titles — flagged in
+pairs); **cross-lingual title bridging** (a Chinese original title against an
+English registry record is resolved via the bilingual original-title field,
+the DOI landing page, or OpenAlex — a hit upgrades to `verified`, a miss keeps
+`partial`, a language difference is never fabrication evidence); **bibliography profiling** (list-level batch-fabrication fingerprints — serial identifier
+clusters, year/source over-concentration — flags are review leads, never
+verdicts); **preprint upgrade hints** (an arXiv-only reference since published
+as a journal article gets annotated with the formal DOI); retraction checks
+(online or offline via `--retraction-cache`); Wayback links for dead links;
+per-reference **completeness scoring**; parallel verification + local disk
+cache; weak networks: `--proxy` / `--cn` / `--preflight`, with automatic
+degraded-network mode when 3+ registries fail at transport level. Full
+semantics: `references/verification-details.md`.
 
-**Semantic layer (the model)**: decompose each cited claim into atomic
-claim-triplets (subject–relation–object, RefChecker style) BEFORE judging,
-then verify each triplet against the source — granularity moves from
-paragraph to triple, so "which half-sentence is wrong" becomes answerable.
-Register the verdict structurally so it becomes auditable workpaper, not a
-feeling:
-`"semantic": {"claim": "...", "support": "supported|partial|not_in_source|
-contradicted|unclear", "quote": "...", "note": "..."}`. The verifier carries
-it into `--export auditjson` and a report section; `not_in_source` /
-`contradicted` cap the mechanical verdict at `partial` with a human-review
-flag — a source that exists is not a source that agrees.
+**Semantic layer (the model)** — decompose each cited claim into atomic
+claim-triplets (subject–relation–object) and verify each against the source;
+register the verdict structurally (`"semantic": {"claim", "support", "quote",
+"note"}`) — it becomes auditable workpaper; `not_in_source`/`contradicted` cap
+the mechanical verdict at `partial` — a source that exists is not a source
+that agrees.
 
-**Multi-source confirmation**: verified titles get an OpenAlex bibliographic
-cross-check; DOI references whose registry metadata could not be fetched get
-a Semantic Scholar second confirmation; references with no DOI/PMID/arXiv at
-all get a Semantic Scholar title-search confirmation — confirmation only,
-never a downgrade: databases have coverage gaps, "not found" ≠ fabricated.
-
-**Task → flag** (details in `references/verification-details.md`):
+**Task → flag**:
 
 | Task | Flags |
 |---|---|
-| Medical topics | `--easy` (auto medical + exports) · `--profile medical` |
-| Share / archive | `--format html` (self-contained single file) |
+| Medical topics | `--easy` · `--profile medical` |
+| Share / archive | `--format html` |
 | Export | `--export bibtex,gbt7714,ris,csv,auditjson` |
-| CI | `--strict` · `--offline` (structure only, caps at `partial`) |
+| CI | `--strict` · `--offline` |
 | Polite pacing | `--mailto you@lab.edu` |
-| API keys | `--openalex-key` / `--s2-key` / `--ncbi-key` (env of same name) |
+| API keys | `--openalex-key` / `--s2-key` / `--ncbi-key` |
 | Weak network | `--proxy` · `--cn` · `--preflight` · `--timeout` |
 | Cache | `--no-cache` / `--refresh-cache` / `--cache-ttl` |
-| Self-check | `--doctor` (add `--net` for registry probes) |
-| Pre-submission final check | `--preset submission` (strict + GB·T/BibTeX/CSV exports in one flag) |
-| Explain one verdict | `--explain N` (plain-language chain: semantics / evidence / error codes / notes / completeness) |
-| External judging | `--judge-url` / `--nli-url` / `--fast-judge-url` (notes only, never flip verdicts) |
-| MCP server | `mcp/server.py` — tools `verify_references` / `explain_verdict` / `check_document`, resources (capability matrix, changelog), `fact_check_workflow` prompt |
-
-**Offline mode (`--offline`)**: structure checks only — honesty first, never
-awards `verified`.
-
-**Medical research mode (v1.2)**: for clinical questions read
-`references/medical-mode.md` first and run with `--profile medical`.
+| Self-check | `--doctor` (add `--net`) |
+| Pre-submission check | `--preset submission` |
+| Explain one verdict | `--explain N` |
+| Pre-submission grill | `--grill report.json` (adversarial review checklist) |
+| External judging | `--judge-url` / `--nli-url` / `--fast-judge-url` (notes only) |
+| MCP server | `mcp/server.py` — `verify_references` / `explain_verdict` / `check_document` |
 
 ### 5. SYNTHESIZE
 
-Follow the skeleton in `references/report-template.md`: executive summary
-first; every key conclusion carries a confidence grade + citation ids; the
-reference table carries verdicts; `unverified/unreachable` items live only in
-the "human review" section; finish with gaps, disagreements, and follow-up
-questions.
+Follow `references/report-template.md`: executive summary first; every key
+conclusion carries a confidence grade + citation ids; the reference table
+carries verdicts; `unverified/unreachable` live only in the "human review"
+section; finish with gaps, disagreements, follow-up questions.
 
 ## Files
 
 | File | When |
 |---|---|
-| `scripts/verify_refs.py` | VERIFY phase mechanical check (pure stdlib, cross-platform, rate-limited) |
+| `scripts/verify_refs.py` | VERIFY mechanical check (pure stdlib, cross-platform) |
 | `references/GLOSSARY.md` | canonical terms (five verdicts / signals / error codes) with Avoid lists |
-| `references/out-of-scope.md` | explicit non-goals, each with a reason |
+| `references/out-of-scope.md` | explicit non-goals + honest limits, each with a reason |
+| `references/security.md` | full security & behavior declaration |
 | `docs/adr/` | architecture decision records (public layer) |
-| `mcp/server.py` | optional MCP server: expose `verify_references` as an MCP tool (FastMCP; same engine) |
+| `mcp/server.py` | optional MCP server (same engine) |
 | `references/search-strategies.md` | read before SEARCH |
-| `references/report-template.md` | skeleton for SYNTHESIZE; refs schema |
-| `references/verification-details.md` | full option semantics, cross-check rules, thresholds |
-| `references/faq.md` | common questions (network, PMID wording, exports) |
-| `references/medical-mode.md` | read before medical/clinical research (v1.2) |
-| `examples/demo_refs.json` | general demo: 8 refs, 3 planted fabrications |
-| `examples/medical_refs.json` | medical demo: PMID/DOI refs + planted fake PMID + planted duplicate |
+| `references/report-template.md` | SYNTHESIZE skeleton; refs schema |
+| `references/verification-details.md` | full option semantics, thresholds |
+| `references/anti-patterns.md` | misuse catalog, each with an alternative |
+| `references/faq.md` | common questions |
+| `references/medical-mode.md` | read before medical/clinical work |
+| `examples/demo_refs.json` | 8 refs, 3 planted fabrications |
 
-## ⚠️ Common mistakes (anti-patterns)
+## ⚠️ Common mistakes
 
-- Treating `verified` as "the content is correct" — verification confirms the
-  source exists and matches the claim's source, not that the reasoning holds.
-  The semantic check and your own reading still matter.
-- Citing a `partial` source as if it were reliable — `partial` means downgrade
-  or explain in the text; never silently promote it.
-- Retrying `unreachable` links forever — open the Wayback link once, then
-  switch sources if it stays dead.
-- Relying on `--easy` for clinical work — auto-detection is a convenience;
-  for real medical conclusions pass `--profile medical` explicitly.
-- Running without `--strict` in CI/automated pipelines and expecting exit
-  codes to gate anything.
-- Assuming `verified` means "safe to cite forever" — retracted papers are
-  flagged (Crossref/Retraction Watch), but retraction status can change after
-  your run.
+See `references/anti-patterns.md` (14 entries, each with the right way
+instead). The two that matter most: never treat `verified` as "the content is
+correct" — that is the semantic layer's job; never treat `unreachable` as
+"fake" — retry via `--cn`/`--proxy` first.
 
-## Security & behavior declaration
+## Security, honest limits, FAQ
 
-- Single-run CLI: start, verify, write the report, exit. No daemons, no
-  background jobs, nothing downloaded or installed at runtime (pure standard
-  library).
-- Network access is limited to these official academic registries, always over
-  HTTPS: `doi.org`, `api.crossref.org`, `eutils.ncbi.nlm.nih.gov`,
-  `export.arxiv.org` / `arxiv.org`, `archive.org`, `api.openalex.org`,
-  `api.semanticscholar.org`, `pubmed.ncbi.nlm.nih.gov`. No other hosts are
-  contacted; no telemetry, no analytics, no data collection.
-- Your reference lists and reports stay on your machine — the only outbound
-  payloads are the identifiers and titles you asked to verify.
-- Optional environment variables `OPENALEX_API_KEY` / `S2_API_KEY` /
-  `NCBI_API_KEY` authenticate
-  your own requests to those two APIs and are never sent anywhere else. The
-  local verdict cache lives under `~/.cache/cite-holmes/` (`--no-cache` to
-  disable).
-- No OS integration: no subprocesses, no system services, no privilege
-  changes; file access is limited to your inputs/outputs plus the cache and
-  report paths you pass.
-
-## Honest limits
-
-- Not a fit for: PDF/Word documents (extract citations manually first),
-  Chinese-database-only IDs (Wanfang/CQVIP numbers — verify via URL or title
-  instead), and fact-checking what a page *claims* (the mechanical layer
-  verifies existence and consistency; meaning is the semantic layer's job).
-- A fabricated citation pointing to a real, live, plausible page passes the
-  mechanical layer; the semantic layer may catch it — model judgment, not a
-  guarantee.
-- `unreachable` ≠ fake; database "not found" ≠ fabricated (coverage lag).
-- No public-registry check replaces reading the source — the July 2026 arXiv
-  survey of citation checkers found none reliable enough to run unsupervised;
-  treat this skill as a transparent multi-source assistant with a full audit
-  trail (`--export auditjson`), not an oracle.
-- Reproducible demo: `python scripts/verify_refs.py --refs examples/demo_refs.json`
-  (8 refs, 3 planted fabrications, all caught).
-- Medical demo: `python scripts/verify_refs.py --refs examples/medical_refs.json
-  --profile medical --export bibtex,csv`.
-
-## FAQ
-
-See `references/faq.md` (slow networks / blocked endpoints, what PMID wording
-means, exports into Zotero/EndNote, how arXiv IDs are judged). Quick answers:
-`verified` is existence+consistency, not truth; `unreachable` ≠ fake;
-`--easy` covers the medical profile auto-detection; `--export bibtex` gives
-Zotero/EndNote-ready verified-only bibliography.
+- Security & behavior declaration: single-run; HTTPS-only to the official
+  academic registries (doi.org / api.crossref.org / eutils.ncbi.nlm.nih.gov /
+  export.arxiv.org / api.openalex.org / api.semanticscholar.org / archive.org /
+  pubmed.ncbi.nlm.nih.gov); zero telemetry. Full text: `references/security.md`
+- Honest limits & explicit non-goals: `references/out-of-scope.md`
+- Common questions: `references/faq.md`
 
 ## 30-second quickstart
 
 ```bash
-# 1. references as JSON (title/url/source/year per item) — or a Zotero .bib
+# 1. references as JSON (title/url/source/year) — or a Zotero .bib
 # 2. verify:
 python scripts/verify_refs.py --refs refs.json --out report.md
 # 3. read report.md — CiteScore + pre-submission conclusion at the top.
-# Medical? add --profile medical.  Paper?  add --export bibtex.
-# Institution/CI?  add --mailto you@lab.edu (Crossref polite pool).
+# Paper? add --export bibtex.  Medical? add --profile medical.
+# Already verified once? add --grill report.json for the review checklist.
 ```
 
 ## Environment fallback

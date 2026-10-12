@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.13.0"
+VERSION = "3.14.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -3575,6 +3575,92 @@ _DOCTOR_PROBES = [
 ]
 
 
+# ═══ v3.14 --grill 对抗审查:对已核验报告做「审稿人预演」 ═══
+
+_GRILL_BY_VERDICT = {
+    "verified": [
+        "该文献在你核验之后是否可能被撤稿/更正？——投稿前用撤稿库复查一次（--refresh-cache 重跑）",
+        "引用句声称的结论强度是否超过了该文献实际支持的范围？（机械层只证明来源存在且一致，"
+        "「这句话是否被支撑」请对照原文逐句确认——必要时用 --check-document 做锚词核验）",
+        "你引用的是这一篇，还是同刊同年的相似题名？核对卷期页与 DOI 是否逐字一致",
+    ],
+    "partial": [
+        "降级原因（见注记/错误码）是否直接影响你引用的那句话？若只影响其他部分，"
+        "在正文中明确标注保留意见范围",
+        "能否找到一个更强的替代来源替换它？（partial 来源长期留在关键结论上是风险敞口）",
+    ],
+    "unreachable": [
+        "报告附带的 Wayback 存档链里，存档内容与你声称的内容一致吗？打开对照过吗？",
+        "更换网络（--cn/--proxy）重跑后仍不可达吗？——不可达连续两轮就该换信源",
+    ],
+    "invalid": [
+        "标识符是否为一位之差的抄写错误？按标题在注册库检索过正确的 ID 吗？",
+        "若为编造：溯源到正文哪一句产生的它？——同一句附近的其他引用需要连坐复查",
+    ],
+    "unverified": [
+        "联网重跑的阻塞是什么？离线 partial 不能作为投稿依据（ADR-0003）",
+    ],
+}
+
+_GRILL_LIST_LEVEL = [
+    "清单画像/克隆对旗标（若有）逐条作答了吗？——旗标是审稿人第一眼会问的问题单",
+    "CiteScore 与投稿结论基于本次核验时刻——距投稿超过一周建议 --refresh-cache 重跑一次",
+    "「待人工复核」区的条目是否每条都有了结论（处理/替换/删除）？——带着未决条目投稿是最大风险",
+]
+
+
+def grill_report(results: list) -> list:
+    """v3.14 对抗审查问题单（审稿人预演，纯模板零网络）：对已核验的每条引用
+    生成「最强挑战问题」——逐条作答后报告才具备投稿说服力。只出问题不出
+    判定（与 ADR-0005 同向：这是自查工具，不是二次审判）。返回
+    [{index, verdict, title, questions}]。"""
+    out = []
+    for r in results:
+        qs = list(_GRILL_BY_VERDICT.get(r.get("verdict"), [
+            "该条判定异常（非五态），请重跑确认",
+        ]))
+        note = str(r.get("note") or "")
+        if "克隆引用对" in note:
+            qs.append("该条处于克隆引用对中——与配对条目孰真孰假，元数据核验结论是什么？")
+        if "正式发表" in note:
+            qs.append("预印本升级提示处理了吗？引用是否已换成注记中的期刊版 DOI？")
+        if "跨语言" in note:
+            qs.append("跨语言桥接未命中/命中——登记原题与你的引文是同一篇吗？人工确认了吗？")
+        out.append({"index": r.get("index"), "verdict": r.get("verdict"),
+                    "title": str(r.get("title") or "")[:80], "questions": qs})
+    return out
+
+
+def render_grill_md(items: list, meta: dict) -> str:
+    """v3.14 对抗审查问题单渲染（md）。meta 含 score/grade。"""
+    n_q = sum(len(x["questions"]) for x in items)
+    bluf = ("---\nverdict: 对抗审查问题单就绪——逐条作答后再投稿\n"
+            f"key_numbers: {len(items)} 条引用 · {n_q} 个挑战问题 · 判定不变\n"
+            "blocker: 无（问题单是自查工具）\n"
+            "next_action: 按清单逐条作答，未决条目投稿前处理\n"
+            f"cite_holmes_version: {VERSION}\n---")
+    lines = [bluf, "",
+             "# 对抗审查问题单（审稿人预演）",
+             f"- 生成：verify_refs.py v{VERSION} · 来源报告 CiteScore "
+             f"{meta.get('score', '?')}/100（{meta.get('grade', '?')} 级）",
+             "- 用法：逐条作答。答不上来的条目就是你投稿前要处理的事——问题单"
+             "不改变任何判定（自查工具，非二次审判）。", ""]
+    cur = None
+    for it in items:
+        if it["verdict"] != cur:
+            cur = it["verdict"]
+            lines.append(f"## {VERDICT_ZH.get(cur, cur)}")
+        lines.append(f"### #{it['index']} {it['title']}")
+        for q in it["questions"]:
+            lines.append(f"- [ ] {q}")
+        lines.append("")
+    lines += ["## 清单级追问", ""]
+    for q in _GRILL_LIST_LEVEL:
+        lines.append(f"- [ ] {q}")
+    lines.append("")
+    return "\n".join(lines)
+
+
 # v3.12 --explain:错误码人话翻译表(与 derive_error_codes 码表一一对应)
 _ERR_CODE_ZH = {
     "E_DOU_NOT_FOUND": "DOI 在 DOI.org 不存在（404）——疑似编造引用",
@@ -3749,6 +3835,9 @@ def main() -> int:
                     help="v3.12 场景预设：submission=投稿前参考文献终检"
                          "（--strict 严格退出码 + --export gbt7714,bibtex,csv 组合，"
                          "判定语义不变，只打包常用旗标）")
+    ap.add_argument("--grill", metavar="REPORT_JSON", default="",
+                    help="v3.14 对抗审查：对已生成的 JSON 报告出「审稿人预演」问题单"
+                         "（逐条最强挑战+清单级追问，纯模板零网络，不改变任何判定）")
     ap.add_argument("--explain", type=int, metavar="N", default=None,
                     help="v3.12 跑批后对第 N 条输出判定链人话解释"
                          "（判定语义/依据步骤/错误码/注记/完整度/建议动作）")
@@ -3820,6 +3909,30 @@ def main() -> int:
         print(f"[preset] submission：--strict + --export {args.export} 已组合"
               "（投稿前一键终检；判定语义与默认模式完全一致。"
               "注意 --strict 语义含绕过磁盘缓存读——复跑为全量外呼）")
+    if getattr(args, "grill", ""):
+        gpath = os.path.expanduser(args.grill)
+        if not os.path.isfile(gpath):
+            print(f"❌ 报告文件不存在：{gpath}（--grill 需要一次真实核验产出的 JSON 报告）")
+            return 2
+        try:
+            with open(gpath, encoding="utf-8") as f:
+                doc = json.load(f)
+        except (ValueError, UnicodeDecodeError) as e:
+            print(f"❌ 不是有效的 JSON 报告：{gpath}（{type(e).__name__}）——"
+                  "请先跑一次 --refs 核验生成报告")
+            return 2
+        if not (doc.get("results") or []):
+            print(f"❌ {gpath} 内无 results 字段——请提供本工具生成的完整 JSON 报告")
+            return 2
+        items = grill_report(doc.get("results") or [])
+        sc = doc.get("scorecard") or {}
+        out = args.out if args.out != "verify_report.md" else gpath.rsplit(".", 1)[0] + "_grill.md"
+        with open(out, "w", encoding="utf-8") as f:
+            f.write(render_grill_md(items, sc))
+        n_q = sum(len(x["questions"]) for x in items)
+        print(f"[grill] 对抗审查问题单：{len(items)} 条引用 · {n_q} 个挑战问题 → {out}")
+        print("[grill] 判定不变（自查工具）；逐条作答后再投稿。")
+        return 0
     if getattr(args, "doctor", False):
         return run_doctor(net=getattr(args, "net", False),
                           timeout=min(args.timeout, 8.0),

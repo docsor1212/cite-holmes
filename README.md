@@ -222,6 +222,14 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.16.0** — card conversion release: the SkillHub card's first line now
+  leads with what searchers actually type (citation verification / reference
+  checking / AI-hallucination detection / fabricated DOI / pre-submission
+  check) instead of brand phrasing; the listing category was corrected from
+  knowledge-management to professional/科研学术 to match the peer tool in the
+  same space. No engine changes — this is a discoverability-and-conversion
+  release informed by a controlled comparison experiment on default search
+  ordering. 443 tests green.
 - **v3.15.0** — the script-aware-guard release: the cross-language guard now
   works by **writing system** (Latin / Cyrillic / Greek / Han / Kana / Hangul)
   instead of CJK-only — a Russian, Greek, Japanese or Korean claimed title
@@ -234,7 +242,7 @@ or gate your CI on it (`--strict`).
   table for large batches (20-ref mixed list: ~18s at `--workers 4`, ~7s
   cache-warm, ~47s serial — measured, with 100-ref projections) and a
   multilingual boundary section. SKILL.md mechanical/semantic layers gained
-  sub-headings for scan-ability. 437 tests green.
+  sub-headings for scan-ability. 443 tests green.
 - **v3.14.0** — the lean-main-file release: SKILL.md slimmed ~30% (294→207
   lines EN / 249→176 ZH) by moving the anti-patterns catalog, the full
   security declaration (`references/security.md`) and the honest limits (now

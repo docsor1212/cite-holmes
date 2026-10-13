@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.14.0"
+VERSION = "3.15.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -314,11 +314,9 @@ def _author_consistent(claimed: list, csl_authors) -> bool:
     if not reg or not claimed_n:
         return True
 
-    def _has_cjk(s: str) -> bool:
-        return any("\u4e00" <= ch <= "\u9fff" for ch in s)
-
-    # 跨语言不可比：声称侧含 CJK 而登记侧全拉丁（或反之）→ 跳过判定
-    if _has_cjk(claimed_n[0]) != any(_has_cjk(r) for r in reg):
+    # v3.15 跨族守卫：声称与登记主导文字系统不同（任意族组合）→ 跳过判定
+    sf_c = _script_family(claimed_n[0])
+    if sf_c != "none" and all(_script_family(r) != sf_c for r in reg):
         return True
     for c in claimed_n:
         for r in reg:
@@ -473,6 +471,35 @@ def _cjk_norm(s: str) -> str:
         if ch.isalnum() or "\u4e00" <= ch <= "\u9fff":
             out.append(ch)
     return "".join(out)
+
+
+def _script_family(s: str) -> str:
+    """v3.15 文字系统族判定（跨语言守卫用）：返回文本的主导文字系统。
+    latin / cyrillic / greek / han / kana / hangul / none。假名在场即判 kana
+    （假名仅用于日文——中日汉字题名借此可分）。跨族题名的字符相似度天然
+    不可信，这正是守卫要扩到「中英之外」的依据：俄文/希腊文/日文声称题名
+    对英文登记名，旧守卫（只认 CJK）会漏判导致 sim 低被误判 invalid。"""
+    from collections import Counter
+    cnt = Counter()
+    for ch in str(s or ""):
+        o = ord(ch)
+        if 0x0400 <= o <= 0x04FF:
+            cnt["cyrillic"] += 1
+        elif 0x0370 <= o <= 0x03FF or 0x1F00 <= o <= 0x1FFF:
+            cnt["greek"] += 1
+        elif 0x3040 <= o <= 0x30FF:
+            cnt["kana"] += 1
+        elif 0xAC00 <= o <= 0xD7AF or 0x1100 <= o <= 0x11FF:
+            cnt["hangul"] += 1
+        elif 0x4E00 <= o <= 0x9FFF or 0x3400 <= o <= 0x4DBF:
+            cnt["han"] += 1
+        elif ch.isalpha():
+            cnt["latin"] += 1
+    if not cnt:
+        return "none"
+    if cnt.get("kana"):
+        return "kana"
+    return cnt.most_common(1)[0][0]
 
 
 def _cross_lingual_bridge(doi: str, claimed: str, meta: dict,
@@ -712,10 +739,9 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
             a, b = _nj(x), _nj(y)
             if not a or not b:
                 return True
-            # 跨语言不可比（如中文译名 vs 英文登记名）：不判不符
-            a_cjk = any("\u4e00" <= c <= "\u9fff" for c in a)
-            b_cjk = any("\u4e00" <= c <= "\u9fff" for c in b)
-            if a_cjk != b_cjk:
+            # v3.15 跨族守卫（原 CJK-only）：主导文字系统不同（如俄文刊名 vs
+            # 英文登记名、混合文字刊名）→ 不判不符
+            if _script_family(a) not in ("none", _script_family(b)):
                 return True
             if a in b or b in a:
                 return True
@@ -738,13 +764,12 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
     if not title:
         return (jadj or aadj), (f"DOI 元数据核验完成（引用未提供标题，无法比对；"
                                 f"登记年份 {meta_year or '未知'}）{jnote}{anote}"), True, csl
-    def _has_cjk(t):
-        return any("\u4e00" <= c <= "\u9fff" for c in str(t or ""))
-    # v3.0.0 跨语言守卫：中文声称 vs 英文登记（或反之）相似度天然低——
-    # 跨语言不可比不判 invalid。v3.10 升级：先走三级桥接核验（original-title
-    # 双语记录/落地页/OpenAlex 原语言题名），命中升 verified；未命中维持
-    # partial 转人工（守卫方向不变：跨语言永远不构成编造依据）。
-    if title and sim < 0.50 and (_has_cjk(title) != _has_cjk(meta_title)):
+    # v3.15 文字系统守卫（原 v3.0 仅 CJK）：声称与登记的主导文字系统不同
+    # （中俄/希/日/韩 vs 拉丁等任意跨族组合）即视为跨语言——不判 invalid。
+    # v3.10 三级桥接核验对各族同样适用（original-title/落地页/OpenAlex）。
+    _sf_claim, _sf_reg = _script_family(title), _script_family(meta_title)
+    if title and sim < 0.50 and _sf_claim != "none" and _sf_reg != "none" \
+            and _sf_claim != _sf_reg:
         bridge = _cross_lingual_bridge(doi, title, meta, timeout)
         if bridge:
             # 审计 B1 修复：桥接只解决「标题跨语言不可比」，期刊/作者不符信号
@@ -754,8 +779,8 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
             return (jadj or aadj), (f"DOI 元数据核验一致（跨语言桥接：{bridge}；"
                                     f"登记题名《{str(meta_title)[:60]}》）{jnote}{anote}"
                                     ), True, csl
-        return "partial", (f"跨语言标题无法机器比对（声称中文/登记英文或反之,相似度 "
-                           f"{sim:.2f}；桥接核验未命中）{jnote}{anote}"
+        return "partial", (f"跨语言标题无法机器比对（声称 {_sf_claim} 文 vs 登记 "
+                           f"{_sf_reg} 文,相似度 {sim:.2f}；桥接核验未命中）{jnote}{anote}"
                            f"→ 建议人工核对"), True, csl
     if title and sim < 0.50:
         return "invalid", (f"DOI 元数据标题相似度仅 {sim:.2f} → DOI 指向的不是这篇论文，"
@@ -1186,9 +1211,8 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
     if not title:
         return "", (f"arXiv 元数据核验完成（引用未提供标题，无法比对；登记年份 "
                     f"{meta_year or '未知'}）{ver_note}"), True
-    def _has_cjk_a(t):
-        return any("\u4e00" <= c <= "\u9fff" for c in str(t or ""))
-    if sim < 0.50 and (_has_cjk_a(title) != _has_cjk_a(meta_title)):
+    # v3.15 文字系统守卫（与 DOI 路径同规）
+    if sim < 0.50 and _script_family(title) not in ("none", _script_family(meta_title)):
         return "partial", (f"跨语言标题无法机器比对（相似度 {sim:.2f} 不作编造依据）"
                            "→ 建议人工核对"), True
     if sim < 0.50:

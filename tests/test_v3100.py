@@ -303,7 +303,7 @@ class TestDoctor(unittest.TestCase):
             code = vr.run_doctor(net=False)
         out = buf.getvalue()
         self.assertEqual(code, 0)
-        self.assertIn("verify_refs.py v3.14.0", out)
+        self.assertIn("verify_refs.py v3.15.0", out)
         self.assertIn("verdict: all clear", out)
         self.assertNotIn("探针", out)  # 零外呼:无探针段
 
@@ -352,12 +352,12 @@ class TestCapabilityAndDocs(unittest.TestCase):
         self.assertTrue(any("克隆引用对" in x for x in cap["caught"]))
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "3.14.0")
+        self.assertEqual(vr.VERSION, "3.15.0")
 
     def test_skill_md_version_and_doctor(self):
         p = os.path.join(HERE, "..", "SKILL.md")
         t = open(p, encoding="utf-8").read()
-        self.assertIn("version: 3.14.0", t)
+        self.assertIn("version: 3.15.0", t)
         self.assertIn("--doctor", t)
         self.assertIn("cross-lingual title bridging", t.lower())
         self.assertIn("clone-pair detection", t.lower())
@@ -373,7 +373,7 @@ class TestCapabilityAndDocs(unittest.TestCase):
         # 渐进披露:VERIFY 段命令块必须先于特性散文(语义层之后是任务表)
         t = open(os.path.join(HERE, "..", "SKILL.md"), encoding="utf-8").read()
         seg = t.split("### 4. VERIFY")[1].split("### 5.")[0]
-        self.assertLess(seg.index("```bash"), seg.index("**Mechanical layer"))
+        self.assertLess(seg.index("```bash"), seg.index("#### Mechanical layer"))
         self.assertIn("| Task | Flags |", seg)
 
 

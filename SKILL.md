@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 3.14.0
+version: 3.15.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -107,7 +107,9 @@ cross-checked against its official registry, so fabricated IDs are judged
 dual-reader header** + **CiteScore** (0-100 + A-D grade) + a one-line
 **pre-submission conclusion**.
 
-**Mechanical layer (the script)** — claim↔registry title/year/journal/author
+#### Mechanical layer (the script)
+
+Claim↔registry title/year/journal/author
 consistency; 11 machine-readable error codes; **clone-pair detection** (same
 title under different DOIs, or one DOI with different titles — flagged in
 pairs); **cross-lingual title bridging** (a Chinese original title against an
@@ -123,14 +125,16 @@ cache; weak networks: `--proxy` / `--cn` / `--preflight`, with automatic
 degraded-network mode when 3+ registries fail at transport level. Full
 semantics: `references/verification-details.md`.
 
-**Semantic layer (the model)** — decompose each cited claim into atomic
+#### Semantic layer (the model)
+
+Decompose each cited claim into atomic
 claim-triplets (subject–relation–object) and verify each against the source;
 register the verdict structurally (`"semantic": {"claim", "support", "quote",
 "note"}`) — it becomes auditable workpaper; `not_in_source`/`contradicted` cap
 the mechanical verdict at `partial` — a source that exists is not a source
 that agrees.
 
-**Task → flag**:
+#### Task → flag
 
 | Task | Flags |
 |---|---|

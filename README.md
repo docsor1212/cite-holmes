@@ -204,6 +204,15 @@ python scripts/verify_refs.py --refs refs.json --strict
 
 Zero dependencies (pure Python stdlib), cross-platform (Windows/Linux/macOS), MIT license.
 
+## Install
+
+```bash
+# Via the skills CLI (Claude Code / Codex / any agent):
+npx skills add docsor1212/cite-holmes
+# Or clone and run directly (no install step):
+git clone https://github.com/docsor1212/cite-holmes && python cite-holmes/scripts/verify_refs.py --refs refs.json --out report.md
+```
+
 ## CiteScore — every report carries a grade
 
 Each verification report opens with a **CiteScore**: a 0-100 confidence score
@@ -213,6 +222,19 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+- **v3.15.0** — the script-aware-guard release: the cross-language guard now
+  works by **writing system** (Latin / Cyrillic / Greek / Han / Kana / Hangul)
+  instead of CJK-only — a Russian, Greek, Japanese or Korean claimed title
+  against an English registry record can no longer be mis-judged `invalid` by
+  low similarity; it goes through the same cross-language guard (partial +
+  bridge, or an upgrade on a bridging hit). Same-family pairs (German vs
+  German, French vs French) still compare normally, and German-claimed vs
+  English-registered stays a real similarity judgment. Docs answer the two
+  remaining boundary questions with measured numbers: an expected-duration
+  table for large batches (20-ref mixed list: ~18s at `--workers 4`, ~7s
+  cache-warm, ~47s serial — measured, with 100-ref projections) and a
+  multilingual boundary section. SKILL.md mechanical/semantic layers gained
+  sub-headings for scan-ability. 437 tests green.
 - **v3.14.0** — the lean-main-file release: SKILL.md slimmed ~30% (294→207
   lines EN / 249→176 ZH) by moving the anti-patterns catalog, the full
   security declaration (`references/security.md`) and the honest limits (now

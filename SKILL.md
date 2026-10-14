@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 3.15.0
+version: 3.17.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -14,8 +14,9 @@ description: >-
   unverified references never masquerade as real (AI hallucination detection).
   Medical mode (Cochrane/BMJ/ChiCTR/NMPA/CDC/NICE presets, PMID check) and
   bibliography export (BibTeX/GB·T 7714-2025/RIS/CSV + JSON workpaper) built
-  in. Trigger matching is semantic, not exact — mis-triggers are harmless;
-  state your real intent to avoid them.
+  in. Skip when: translation, polishing, rewriting, de-AI-flavoring — anything
+  not about citation authenticity (mis-triggers are harmless; state your real
+  intent). Trigger matching is semantic, not exact.
 when_to_use: >-
   Use when the user says "deep research", "look into", "investigate",
   "compare A vs B", "fact check", "verify this claim", "is it true that...",
@@ -109,21 +110,20 @@ dual-reader header** + **CiteScore** (0-100 + A-D grade) + a one-line
 
 #### Mechanical layer (the script)
 
-Claim↔registry title/year/journal/author
-consistency; 11 machine-readable error codes; **clone-pair detection** (same
-title under different DOIs, or one DOI with different titles — flagged in
-pairs); **cross-lingual title bridging** (a Chinese original title against an
-English registry record is resolved via the bilingual original-title field,
-the DOI landing page, or OpenAlex — a hit upgrades to `verified`, a miss keeps
-`partial`, a language difference is never fabrication evidence); **bibliography profiling** (list-level batch-fabrication fingerprints — serial identifier
-clusters, year/source over-concentration — flags are review leads, never
-verdicts); **preprint upgrade hints** (an arXiv-only reference since published
-as a journal article gets annotated with the formal DOI); retraction checks
-(online or offline via `--retraction-cache`); Wayback links for dead links;
-per-reference **completeness scoring**; parallel verification + local disk
-cache; weak networks: `--proxy` / `--cn` / `--preflight`, with automatic
-degraded-network mode when 3+ registries fail at transport level. Full
-semantics: `references/verification-details.md`.
+| Capability | Boundary |
+|---|---|
+| Registry consistency (title/year/journal/author) | 11 machine-readable error codes; thresholds 0.50/0.82 |
+| Clone-pair detection | same title under different DOIs / one DOI with different titles — paired leads, never verdicts |
+| Cross-lingual title bridging | six writing-system families (Latin/Cyrillic/Greek/Han/Kana/Hangul); hit→`verified`, miss→`partial`; language difference is never fabrication evidence; families outside the six (Arabic/Hebrew/Thai…) do NOT trigger the guard yet — attach an English/romanized title |
+| Bibliography profiling | list-level batch-fabrication fingerprints — review leads, never verdicts |
+| Preprint upgrade hints | arXiv-only refs since published get the formal DOI annotated |
+| Retraction checks | Crossref online, or offline via `--retraction-cache` |
+| Wayback archive links | attached to dead links automatically |
+| Completeness scoring | how many export fields the registry CSL can back-fill |
+| Speed | 20-ref mixed list ≈18s at `--workers 4` (default), ≈7s cache-warm, ≈47s serial — measured table: `references/verification-details.md` |
+| Weak network | `--proxy` / `--cn` / `--preflight`; auto degraded-network mode after 3+ registry transport failures |
+
+Full semantics: `references/verification-details.md`.
 
 #### Semantic layer (the model)
 
@@ -158,7 +158,10 @@ that agrees.
 Follow `references/report-template.md`: executive summary first; every key
 conclusion carries a confidence grade + citation ids; the reference table
 carries verdicts; `unverified/unreachable` live only in the "human review"
-section; finish with gaps, disagreements, follow-up questions.
+section; finish with a **finding ledger** — revisit the plan's question
+list and mark each as answered / partially answered / unresolved (with the
+budget ledger: rounds used, remaining), then gaps, disagreements, follow-up
+questions.
 
 ## Files
 

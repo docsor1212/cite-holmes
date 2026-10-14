@@ -125,8 +125,8 @@ class TestSkillSlimDown(unittest.TestCase):
         self.assertEqual(seg.count("return 2"), 3)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "3.16.0")
-        self.assertIn("version: 3.16.0",
+        self.assertEqual(vr.VERSION, "3.17.0")
+        self.assertIn("version: 3.17.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
 

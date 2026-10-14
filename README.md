@@ -222,6 +222,10 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v3.17.0** — release tooling debut (internal engineering, no engine changes): parameterized release pipeline, hardlink sentinel, golden regression gate.
+
+**v3.17.0** — release tooling debut (internal engineering, no engine changes): parameterized release pipeline, hardlink sentinel, golden regression gate.
+
 - **v3.16.0** — card conversion release: the SkillHub card's first line now
   leads with what searchers actually type (citation verification / reference
   checking / AI-hallucination detection / fabricated DOI / pre-submission

@@ -222,6 +222,13 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v4.0.0** — version-scheme alignment (major increments in decimal from here on; minor caps at 9): parameterized release tooling, hardlink sentinel, golden regression gate, description negative triggers, capability-boundary tables, finding-ledger closing. Engine addition: a PubMed title-reverse-lookup verification channel for identifier-less (Vancouver-style) medical references — a hit upgrades to `verified` with the PMID anchor back-filled into exports and cache keys.
+
+**v4.0.0** — version-scheme alignment (major increments in decimal from here on; minor caps at 9): parameterized release tooling, hardlink sentinel, golden regression gate, description negative triggers, capability-boundary tables, finding-ledger closing. Engine addition: a PubMed title-reverse-lookup
+  verification channel for identifier-less (Vancouver-style) medical
+  references — a hit upgrades to `verified` with the PMID anchor back-filled
+  into exports and cache keys.
+
 **v3.17.0** — release tooling debut (internal engineering, no engine changes): parameterized release pipeline, hardlink sentinel, golden regression gate.
 
 **v3.17.0** — release tooling debut (internal engineering, no engine changes): parameterized release pipeline, hardlink sentinel, golden regression gate.

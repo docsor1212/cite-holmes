@@ -47,7 +47,7 @@ class TestV111(unittest.TestCase):
     # ---------- 版本 ----------
 
     def test_version_bumped_111(self):
-        self.assertEqual(vr.VERSION, "3.17.0")
+        self.assertEqual(vr.VERSION, "4.0.0")
 
     # ---------- P0-1: arXiv fallback 链 ----------
 

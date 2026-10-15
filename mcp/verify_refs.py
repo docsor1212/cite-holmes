@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "3.16.0"
+VERSION = "4.0.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -809,6 +809,132 @@ def _ncbi_rate_wait():
         if wait > 0:
             time.sleep(wait)
         _NCBI_LAST[0] = time.time()
+
+
+def pubmed_title_reverse_lookup(title: str, source: str, year,
+                                timeout: float) -> tuple:
+    """v4.0.0 Vancouver 医学引用的 PubMed 题名反查（无标识符引用的官方核验通道）。
+
+    医学文档参考文献的主流形态是 Vancouver 纯文本（作者. 题名. 期刊. 年;卷(期):页.），
+    无 DOI/PMID/URL——此前只能走 OpenAlex/S2 标题确认（只确认不升级，unverified 转人工）。
+    本通道用 E-utilities esearch 题名精确短语 → 候选 PMID → esummary 官方元数据 →
+    标题相似度+年份+期刊三重比对，命中即给「官方注册库核验一致」判定并回填 PMID 锚。
+
+    返回 (adjust, note, matched, pmid)：
+      adjust=""  且 matched=True  → 反查一致（调用方可升 verified）
+      adjust="partial"            → 近似命中（转人工）
+      adjust=""   且 matched=False → 未命中（静默：查无≠编造，调用方继续现有通道——
+                                    PubMed 收录面为生物医学/生命科学，中文文献/
+                                    非生物医学引用未命中属预期）
+    判定语义遵循家族铁律：查无永不判死；只升不降。"""
+    q = (title or "").strip()
+    if len(q) < 20:  # 题名过短，检索噪声过大
+        return "", "", False, ""
+    # 检索构造（实测定标 2026-10-14）：整题名短语 [Title] 对含标点长题名零命中
+    # （PubMed phrase 索引 tokenize 问题）——改用区分性实词 AND 组合：
+    # 题名实词按长度降序取 5 个，逐词 [Title] AND（真身命中验证：
+    # ACR/EULAR SSc 分类标准 → PMID 24122180 ✓）
+    stop = {"the", "and", "for", "with", "from", "of", "in", "on", "a", "an", "to",
+            "by", "at", "is", "are", "via", "after", "before", "during", "into",
+            "over", "under", "between", "among", "against", "without", "within",
+            "upon", "than", "that", "this", "these", "those", "its", "their"}
+    words = [w for w in re.findall(r"[A-Za-z\u4e00-\u9fff0-9]{2,}", q)
+             if w.lower() not in stop]
+    words.sort(key=len, reverse=True)
+    if len(words) < 3:
+        return "", "", False, ""
+    # 词数递减重试（5→4→3）：过严组合零命中时逐步放宽（实测 5 词 AND 可对
+    # 长题名零命中，同题 4 词命中）
+    # 词数递减收集全轮候选（5→4→3）：不因某轮有命中而停——4 词轮可能只命中
+    # 高频词杂讯而真身在 3 词轮（实测 #5 短题名场景）；esummary 统一比对
+    ids_all = []
+    for nwords in (5, 4, 3):
+        if len(words) < nwords:
+            continue
+        term = " AND ".join(f"{w}[Title]" for w in words[:nwords])
+        u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+             + _ncbi_qs(f"?db=pubmed&retmode=json&retmax=8&term={quote(term)}"))
+        if _cb_open(u):
+            return "", "", False, ""
+        _ncbi_rate_wait()
+        try:
+            req = urllib.request.Request(
+                u, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                j = json.loads(resp.read().decode("utf-8", "ignore"))
+            _cb_record(u, False)
+            got = [str(x) for x in ((j.get("esearchresult") or {}).get("idlist") or [])]
+        except urllib.error.HTTPError as e:
+            _cb_record(u, False)
+            # 限流可观测：429/403 让调用方知道「没搜成」而非「搜了没命中」
+            return "", (f"PubMed 反查限流（HTTP {e.code}）——建议 NCBI_API_KEY 或分批"
+                        if e.code in (429, 403) else ""), False, ""
+        except Exception:
+            _cb_record(u, True)
+            return "", "", False, ""
+        ids_all.extend(got)
+        if len(got) >= 8:  # 满额命中：该轮已是最优粒度，停
+            break
+    ids = list(dict.fromkeys(ids_all))
+    if not ids:
+        return "", "", False, ""
+    ids = ids[:24]
+    u2 = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+          + _ncbi_qs(f"?db=pubmed&retmode=json&id={','.join(ids)}"))
+    if _cb_open(u2):
+        return "", "", False, ""
+    _ncbi_rate_wait()
+    try:
+        req = urllib.request.Request(
+            u2, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            _cb_record(u2, False)
+            j2 = json.loads(resp.read().decode("utf-8", "ignore"))
+    except Exception:
+        _cb_record(u2, True)
+        return "", "", False, ""
+    def _title_sim(a: str, b: str) -> float:
+        """题名比对双通道取 max：序列相似度（SequenceMatcher）+ 词集 Jaccard。
+        后者对「登记版题名词序重排」鲁棒——ACR/EULAR 分类标准登记题名把年份
+        提前（"2013 classification criteria...: an American College..."），
+        声称题名（参考文献写法）与登记题名词序不同，纯序列比对给 <0.5 误判
+        （实测 2026-10-14，PMID 24122180）。"""
+        a_n, b_n = _cjk_norm(a).lower(), _cjk_norm(b).lower()
+        seq = difflib.SequenceMatcher(None, a_n, b_n).ratio()
+        # 词集用原始题名（保留空格）切词——_cjk_norm 输出是无空格连续串，
+        # 在其上 findall 只会得到一个超长 token，Jaccard 退化为包含度（实测踩坑）
+        ta = set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", str(a).lower()))
+        tb = set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", str(b).lower()))
+        jac = (len(ta & tb) / len(ta | tb)) if (ta or tb) else 0.0
+        return max(seq, jac)
+
+    best = None  # (sim, pmid, meta_title, meta_source, meta_year)
+    for pid in ids:
+        doc = (j2.get("result") or {}).get(pid) or {}
+        mt = str(doc.get("title") or "").strip()
+        if not mt:
+            continue
+        sim = _title_sim(title, mt)
+        my = None
+        m = re.search(r"(19|20)\d{2}", str(doc.get("pubdate") or ""))
+        if m:
+            my = int(m.group(0))
+        ms = str(doc.get("source") or "").strip()
+        year_ok = (not year) or (not my) or abs(int(year) - int(my)) <= 1
+        if year_ok and sim >= 0.82 and (best is None or sim > best[0]):
+            best = (sim, pid, mt, ms, my)
+    if best and best[0] >= 0.82:
+        sim, pid, mt, ms, my = best
+        note = (f"PubMed 题名反查核验一致（PMID:{pid}；登记题名《{mt[:60]}》"
+                f"{'·' + ms if ms else ''}{'·' + str(my) if my else ''}）")
+        return "", note, True, pid
+    if best and best[0] >= 0.50:
+        sim, pid, mt, ms, my = best
+        return ("partial",
+                f"PubMed 题名反查近似命中（PMID:{pid}，相似度 {sim:.2f}，"
+                f"登记题名《{mt[:60]}》）→ 人工核对是否同一篇",
+                True, pid)
+    return "", "", False, ""
 
 
 def pubmed_pmid_exists(pmid: str, timeout: float) -> tuple:
@@ -1751,6 +1877,12 @@ def load_refs_file(path: str) -> list:
         if not refs:
             raise ValueError("BibTeX 文件中没有解析到任何条目（应有 @article{...} 等）")
         return refs
+    if path.lower().endswith((".md", ".markdown")):
+        # v4.0.0 医学文档直接核验：markdown 参考文献节 Vancouver 条目提取
+        refs = parse_markdown_refs(text)
+        if not refs:
+            raise ValueError("markdown 中未解析到编号参考文献条目（应有 '## 参考文献' 节与 '1. ' 编号行）")
+        return refs
     try:
         return json.loads(text)
     except json.JSONDecodeError:
@@ -1760,6 +1892,39 @@ def load_refs_file(path: str) -> list:
                 raise ValueError("内容以 @ 开头但 BibTeX 解析到 0 条，请检查文件格式")
             return refs
         raise
+
+
+def parse_markdown_refs(text: str) -> list:
+    """v4.0.0 从 markdown「参考文献」节提取 Vancouver 编号条目（医学文档主流形态：
+    `1. **作者, et al.** 题名. *期刊*. 年;卷(期):页.`——无 DOI/PMID/URL）。
+    提取的条目走 PubMed 题名反查通道（pubmed_title_reverse_lookup）获得官方核验。
+    解析保守：无编号行/段数不足/题名过短的行跳过。"""
+    refs = []
+    m = re.search(r"(?:^|\n)#{1,3}\s*(?:\d+[.、]?\s*)?(?:参考文献|References)[^\n]*\n", text)
+    body = text[m.end():] if m else text
+    for raw in body.splitlines():
+        line = re.sub(r"\*\*|\*|__|_", "", raw.strip())
+        mm = re.match(r"^(\d{1,3})[.、)]\s+(.{10,})$", line)
+        if not mm:
+            continue
+        rest = mm.group(2).strip()
+        segs = [s.strip(" *") for s in re.split(r"\.\s+", rest) if s.strip(" *")]
+        if len(segs) < 2:
+            continue
+        year = None
+        ym = re.search(r"(19|20)\d{2}", rest)
+        if ym:
+            year = int(ym.group(0))
+        if len(segs) >= 3:
+            title, source = segs[1], segs[2]
+        else:
+            title, source = segs[0], ""
+        if source and re.fullmatch(r"(19|20)\d{2}.*", source):
+            source = ""
+        if len(title) < 15:
+            continue
+        refs.append({"title": title, "source": source, "year": year})
+    return refs
 
 
 def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool = False) -> dict:
@@ -1796,6 +1961,32 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
                 out.update(verdict="invalid",
                            note="缺少 url 且无可解析的 doi/pmid/arxiv" +
                                 ("（pmid 须为 6-9 位数字）" if pmid else ""))
+                return out
+            # v4.0.0 Vancouver 医学引用的官方核验通道（PubMed 题名反查）——
+            # 置于 OpenAlex/S2 之前：它是唯一能给出「官方一致→verified」的无
+            # 标识符通道；未命中静默，继续现有确认路径（只确认不降级不变）
+            pm_adj, pm_note, pm_matched, rev_pmid = pubmed_title_reverse_lookup(
+                t_claim, str(ref.get("source") or ""), ref.get("year"),
+                max(timeout, 20.0))  # 反查=esearch+esummary 两跳，单跳超时给足
+            _eutils_cb = any(v.get("open") for v in _CB.values()
+                             if "eutils" in k) if False else None
+            _eutils_open = any(d.get("open") for hk, d in _CB.items()
+                               if "eutils" in hk)
+            out["checks"]["pubmed_reverse"] = {
+                "ran": True, "matched": pm_matched,
+                "pmid": rev_pmid or None,
+                "skipped_by_circuit": (not pm_matched and not pm_note
+                                       and _eutils_open)}
+            if pm_note:
+                out["note"] = (out["note"] + "；" if out["note"] else "") + pm_note
+            if pm_matched and pm_adj == "":
+                out.update(verdict="verified",
+                           needs_human_check=False,
+                           note=(out["note"] + "；" if out["note"] else "") +
+                                "无标识符引用经 PubMed 官方题名反查核验一致，已回填 PMID 锚")
+                return out
+            if pm_adj == "partial":
+                out.update(verdict="partial", needs_human_check=True)
                 return out
             oa_note = openalex_title_check(t_claim, timeout)
             out["checks"]["openalex"] = {"ran": True,

@@ -122,10 +122,13 @@ class TestMissingFields(unittest.TestCase):
 
 class TestMedicalProfile(unittest.TestCase):
     def test_medical_tier_expansion(self):
-        # 万方：默认层为 blog，medical 预设下升入 journal 层
+        # v4.2.0：中文医学注册库无条件按期刊层识别（注册库地位与模式无关——
+        # 万方在任何模式下都是学术注册库，非医学场景同样不该按 blog 计分）
         url = "https://d.wanfangdata.com.cn/periodical/example"
-        self.assertEqual(vr.classify_tier(url, False), "blog")
+        self.assertEqual(vr.classify_tier(url, False), "journal")
         self.assertEqual(vr.classify_tier(url, True), "journal")
+        # 非注册库的升级型信号仍由 medical 模式驱动（原有语义不回退）
+        self.assertEqual(vr.classify_tier("https://example.org/x", False), "blog")
 
     def test_medical_offline_capped_at_partial(self):
         ref = {"title": "万方文献", "url": "https://d.wanfangdata.com.cn/periodical/x",
@@ -276,7 +279,7 @@ class TestV140(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "r.csv")), "easy 应自动导出 csv")
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "4.1.0")
+        self.assertEqual(vr.VERSION, "4.2.0")
 
 
 class TestHardening(unittest.TestCase):
@@ -1160,7 +1163,7 @@ class TestV170(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "report.json")) is False)
 
     def test_version_bumped_170(self):
-        self.assertEqual(vr.VERSION, "4.1.0")
+        self.assertEqual(vr.VERSION, "4.2.0")
 
 
 class TestV180(unittest.TestCase):
@@ -1390,7 +1393,7 @@ class TestV180(unittest.TestCase):
         self.assertTrue(r["needs_human_check"])
 
     def test_version_bumped_180(self):
-        self.assertEqual(vr.VERSION, "4.1.0")
+        self.assertEqual(vr.VERSION, "4.2.0")
 
 
 class TestV190(unittest.TestCase):
@@ -1446,7 +1449,7 @@ class TestV190(unittest.TestCase):
     # ---------- S2 第三源交叉确认 ----------
 
     def test_version_bumped_190(self):
-        self.assertEqual(vr.VERSION, "4.1.0")
+        self.assertEqual(vr.VERSION, "4.2.0")
 
     def test_s2_confirms_and_rescues_403_landing(self):
         # DOI.org 元数据获取失败（传输错误×2）→ S2 确认存在 → 着陆页 403 救回 verified

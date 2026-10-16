@@ -222,6 +222,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v4.2.0** — Chinese medical citation verification end-to-end: [N]-bracket GB/T 7714 entries (bracket numbering, bare headings, title-first records) now parse; inline PMID/DOI anchors in reference strings are extracted and verified against registries; identifier-less references gain a volume/issue/page locator channel (unique PubMed hit upgrades to verified with the PMID anchor back-filled - language-independent, so a Chinese claimed title against an English registered title caps at human review, never fabrication); PMID-path titles now carry the cross-language guard; Chinese scholarly registries classify at journal tier. Release tooling: full-coverage fallback publishing, MCP engine-copy sha gate, hermetic test sweep.
+
 **v4.1.0** — reliability and nuance: a failed network check is retried, then reported as incomplete - never as a miss; the Vancouver reverse-lookup channel works from two content words (short medical titles); retraction checks distinguish partial retractions, withdrawals, Expressions of Concern (cap verified at partial) and corrections (note-only), and a failed retraction check is flagged instead of silently passing.
 
 **v4.0.0** — version-scheme alignment (major increments in decimal from here on; minor caps at 9): parameterized release tooling, hardlink sentinel, golden regression gate, description negative triggers, capability-boundary tables, finding-ledger closing. Engine addition: a PubMed title-reverse-lookup verification channel for identifier-less (Vancouver-style) medical references — a hit upgrades to `verified` with the PMID anchor back-filled into exports and cache keys.

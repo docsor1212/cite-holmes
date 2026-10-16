@@ -164,10 +164,21 @@ class TestCNFallback(unittest.TestCase):
                     "issued": {"date-parts": [[2023]]}}}))
             raise AssertionError(url)
         # 404=编造证据:CN 模式回源也不得把 DOI.org 404 救回(404 是判定不是传输失败)
+        # 修复(10-16):此前 eff 定义后未打 patch,测试裸调真网 doi.org——网络健康时
+        # 碰巧通过(真 404),抖动代理下必炸并拦停发布链 ④(v4.1.0 发车实录);
+        # 现按同类 _run 模式密封,断言走 mock 的 404 路径
+        calls = []
         vr._OPTS["cn_mode"] = True
-        adj, note, matched, csl = vr.doi_metadata_match(
-            "10.9999/bogus", "anything", 2026, 5)
+
+        def fake_urlopen(req, timeout=5):
+            calls.append(req.full_url)
+            return eff(req.full_url)
+        with unittest.mock.patch.object(vr.urllib.request, "urlopen", fake_urlopen):
+            adj, note, matched, csl = vr.doi_metadata_match(
+                "10.9999/bogus", "anything", 2026, 5)
         self.assertEqual(adj, "invalid")
+        self.assertTrue(any(u.startswith("https://api.crossref.org/") for u in calls),
+                        f"CN 模式 404 后应回源 Crossref: {calls}")
 
 
 if __name__ == "__main__":

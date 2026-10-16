@@ -75,8 +75,10 @@ class TestSkillSlimDown(unittest.TestCase):
     def test_line_budget(self):
         en = len(open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read().splitlines())
         zh = len(open(os.path.join(SK, "SKILL_ZH.md"), encoding="utf-8").read().splitlines())
-        self.assertLessEqual(en, 215, f"EN {en} 行")
-        self.assertLessEqual(zh, 195, f"ZH {zh} 行")
+        # v4.2.0 起预算 +7：GB/T 中文医学引用/注册库两行能力×边界（瘦身后每版
+        # 能力行小步增长是常态，超预算即触发下沉 review）
+        self.assertLessEqual(en, 222, f"EN {en} 行")
+        self.assertLessEqual(zh, 202, f"ZH {zh} 行")
 
     def test_sunk_files_exist(self):
         sec = open(os.path.join(SK, "references", "security.md"), encoding="utf-8").read()
@@ -125,8 +127,8 @@ class TestSkillSlimDown(unittest.TestCase):
         self.assertEqual(seg.count("return 2"), 3)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "4.1.0")
-        self.assertIn("version: 4.1.0",
+        self.assertEqual(vr.VERSION, "4.2.0")
+        self.assertIn("version: 4.2.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
 

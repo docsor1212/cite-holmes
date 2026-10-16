@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "4.1.0"
+VERSION = "4.2.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -374,7 +374,9 @@ TIER_RULES = [
     ]),
     ("journal", [
         r"^pubmed\.ncbi\.nlm\.nih\.gov$", r"^doi\.org$", r"^journals?\.",
-        r"^academic\.", r"^scholar\.", r"^kns\.", r"^oa\.cqvip\.com$", r"^yiigle\.com$",
+        r"^academic\.", r"^scholar\.", r"^kns\.", r"^oa\.cqvip\.com$", r"(^|\.)yiigle\.com$",
+        # v4.2.0 中文医学注册库（dogfood 实测：万方题录 URL 被误层为 blog）
+        r"(^|\.)wanfangdata\.com\.cn$", r"(^|\.)cnki\.(?:net|com\.cn)$",
     ]),
     ("preprint", [r"^arxiv\.org$", r"^biorxiv\.org$", r"^medrxiv\.org$", r"^ssrn\.com$", r"^chemrxiv\.org$"]),
     ("media", [
@@ -984,6 +986,148 @@ def pubmed_title_reverse_lookup(title: str, source: str, year,
     return "", "", False, "", False
 
 
+# v4.2.0 中文医学期刊 → NLM TA（题名缩写）映射。数据源=NLM 目录静态快照（中华医学会
+# 系列命名规律 "Zhonghua X Za Zhi"）。收录错误的代价=锚定零命中静默放行（绝不误判），
+# 未收录期刊（如仅万方收录者）自然落入「查无转人工」的既有诚实路径。
+_CN_JOURNAL_TA = {
+    "中华儿科杂志": "Zhonghua Er Ke Za Zhi",
+    "中华医学杂志": "Zhonghua Yi Xue Za Zhi",
+    "中华结核和呼吸杂志": "Zhonghua Jie He He Hu Xi Za Zhi",
+    "中华心血管病杂志": "Zhonghua Xin Xue Guan Bing Za Zhi",
+    "中华内科杂志": "Zhonghua Nei Ke Za Zhi",
+    "中华外科杂志": "Zhonghua Wai Ke Za Zhi",
+    "中华妇产科杂志": "Zhonghua Fu Chan Ke Za Zhi",
+    "中华神经科杂志": "Zhonghua Shen Jing Ke Za Zhi",
+    "中华放射学杂志": "Zhonghua Fang She Xue Za Zhi",
+    "中华血液学杂志": "Zhonghua Xue Ye Xue Za Zhi",
+    "中华内分泌代谢杂志": "Zhonghua Nei Fen Mi Dai Xie Za Zhi",
+    "中华糖尿病杂志": "Zhonghua Tang Niao Bing Za Zhi",
+    "中华肾脏病杂志": "Zhonghua Shen Zang Bing Za Zhi",
+    "中华消化杂志": "Zhonghua Xiao Hua Za Zhi",
+    "中华肝胆外科杂志": "Zhonghua Gan Dan Wai Ke Za Zhi",
+    "中华普通外科杂志": "Zhonghua Pu Tong Wai Ke Za Zhi",
+    "中华骨科杂志": "Zhonghua Gu Ke Za Zhi",
+    "中华急诊医学杂志": "Zhonghua Ji Zhen Yi Xue Za Zhi",
+    "中华麻醉学杂志": "Zhonghua Ma Zui Xue Za Zhi",
+    "中华护理杂志": "Zhonghua Hu Li Za Zhi",
+    "中华医院管理杂志": "Zhonghua Yi Yuan Guan Li Za Zhi",
+    "中华预防医学杂志": "Zhonghua Yu Fang Yi Xue Za Zhi",
+    "中华流行病学杂志": "Zhonghua Liu Xing Bing Xue Za Zhi",
+    "中华实验外科杂志": "Zhonghua Shi Yan Wai Ke Za Zhi",
+    "中华创伤杂志": "Zhonghua Chuang Shang Za Zhi",
+    "中华肿瘤杂志": "Zhonghua Zhong Liu Za Zhi",
+    "中华耳鼻咽喉头颈外科杂志": "Zhonghua Er Bi Yan Hou Tou Jing Wai Ke Za Zhi",
+    "中华眼科杂志": "Zhonghua Yan Ke Za Zhi",
+    "中华口腔医学杂志": "Zhonghua Kou Qiang Yi Xue Za Zhi",
+    "中华皮肤科杂志": "Zhonghua Pi Fu Ke Za Zhi",
+    "中华老年医学杂志": "Zhonghua Lao Nian Yi Xue Za Zhi",
+    "中华全科医师杂志": "Zhonghua Quan Ke Yi Shi Za Zhi",
+    "中华围产医学杂志": "Zhonghua Wei Chan Yi Xue Za Zhi",
+    "中华检验医学杂志": "Zhonghua Jian Yan Yi Xue Za Zhi",
+    "中华病理学杂志": "Zhonghua Bing Li Xue Za Zhi",
+    "中华高血压杂志": "Zhonghua Gao Xue Ya Za Zhi",
+    "中华炎性肠病杂志": "Zhonghua Yan Xing Chang Bing Za Zhi",
+    "中华新生儿科杂志": "Zhonghua Xin Sheng Er Ke Za Zhi",
+    "中华实用儿科临床杂志": "Zhonghua Shi Yong Er Ke Lin Chuang Za Zhi",
+}
+
+
+def _ta_for_journal(source: str) -> str:
+    """中文刊名 → NLM TA；否则原样返回（英文引用的著录缩写通常即 TA）。"""
+    s = re.sub(r"[\s《》*]+", "", str(source or ""))
+    return _CN_JOURNAL_TA.get(s) or str(source or "").strip()
+
+
+def pubmed_locator_lookup(source: str, year, volume, issue, pages,
+                          timeout: float, claimed_title: str = "") -> tuple:
+    """v4.2.0 卷期页锚定核验（PubMed Single Citation Matcher 的 E-utilities 形态）。
+
+    GB/T 7714 中文医学引用的第二个无标识符通道：期刊+年+卷(期):页 是 PubMed
+    官方引文定位器——语言无关（声称中文题名 vs 登记英文/罗马化题名不影响定位），
+    恰好覆盖题名反查的盲区（非 MEDLINE 题名形态、翻译题名相似度不足）。
+    期刊映射：中文刊名走 _CN_JOURNAL_TA → NLM TA；英文刊名直接作 TA。
+
+    判定（保守）：TA+年+卷+期+页 **唯一命中**（count==1）→ matched，调用方升
+    verified 并回填 PMID 锚；count>=2 → 歧义注记转人工；count==0 → 静默（查无≠编造）。
+    年份必须精确（定位器语义，无 ±1 宽限）。返回 (adjust, note, matched, pmid, net_err)，
+    契约与题名反查一致。"""
+    ta = _ta_for_journal(source)
+    vol = str(volume or "").strip()
+    if not ta or not vol:
+        return "", "", False, "", False
+    try:
+        y = int(str(year)) if year else None
+    except (TypeError, ValueError):
+        y = None
+    if not y:
+        return "", "", False, "", False
+    parts = [f"{ta}[TA]", f"{y}[DP]", f"{vol}[VI]"]
+    iss = str(issue or "").strip()
+    pg = str(pages or "").strip()
+    if iss:
+        parts.append(f"{iss}[IP]")
+    if pg:
+        parts.append(f"{pg}[PG]")
+    term = " AND ".join(parts)
+    u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+         + _ncbi_qs(f"?db=pubmed&retmode=json&retmax=4&sort=relevance&term={quote(term)}"))
+    if _cb_open(u):
+        return "", "", False, "", False
+    _ncbi_rate_wait()
+    try:
+        req = urllib.request.Request(
+            u, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
+        with _urlopen_retry(req, timeout) as resp:
+            j = json.loads(resp.read().decode("utf-8", "ignore"))
+        _cb_record(u, False)
+        er = j.get("esearchresult") or {}
+        count = int(er.get("count") or 0)
+        ids = [str(x) for x in (er.get("idlist") or [])]
+    except urllib.error.HTTPError as e:
+        _cb_record(u, False)
+        return "", (f"PubMed 卷期页锚定限流（HTTP {e.code}）——建议 NCBI_API_KEY 或分批"
+                    if e.code in (429, 403) else ""), False, "", False
+    except Exception:
+        _cb_record(u, True)
+        return "", ("PubMed 卷期页锚定未完成（网络传输失败，已重试）——非查无"
+                    ), False, "", True
+    if count == 1 and ids:
+        pid = ids[0]
+        # 取登记题名进注记（透明底稿；中文声称 vs 登记题名语言差异如实展示）
+        mt = ""
+        u2 = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+              + _ncbi_qs(f"?db=pubmed&retmode=json&id={pid}"))
+        if not _cb_open(u2):
+            _ncbi_rate_wait()
+            try:
+                req2 = urllib.request.Request(
+                    u2, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
+                with _urlopen_retry(req2, timeout) as resp2:
+                    j2 = json.loads(resp2.read().decode("utf-8", "ignore"))
+                _cb_record(u2, False)
+                doc = (j2.get("result") or {}).get(pid) or {}
+                mt = str(doc.get("title") or "").strip()
+            except Exception:
+                _cb_record(u2, True)  # 注记增强失败不影响判定
+        # 审计 A2 修复：定位器只证「卷期页↔PMID」，不证「题名↔PMID」——同文字
+        # 系统时登记题名必须过 sim 0.50（编造同语言题名+真实卷期页不得机器
+        # verified）；跨文字系统（中文声称 vs 登记英文）维持语言无关语义
+        if claimed_title and mt:
+            import difflib
+            _sim = difflib.SequenceMatcher(None, str(claimed_title).strip().lower(),
+                                           re.sub(r"\s+", " ", mt).strip().lower()).ratio()
+            _sf_c, _sf_r = _script_family(str(claimed_title)), _script_family(mt)
+            if _sf_c != "none" and _sf_r != "none" and _sf_c == _sf_r and _sim < 0.50:
+                return "partial", (f"卷期页唯一定位到 PMID:{pid}，但同语言登记题名"
+                                   f"《{mt[:60]}》与声称题名相似度仅 {_sim:.2f}"
+                                   "——疑似错引或拼接，转人工"), False, "", False
+        return "", (f"PubMed 卷期页锚定核验一致（PMID:{pid}；TA:{ta}"
+                    + (f"；登记题名《{mt[:60]}》" if mt else "") + "）"), True, pid, False
+    if count >= 2:
+        return "", (f"卷期页定位到 {count} 条（歧义）——转人工判定"), False, "", False
+    return "", "", False, "", False
+
+
 def pubmed_pmid_exists(pmid: str, timeout: float) -> tuple:
     """经 NCBI E-utilities 核实 PMID 真实存在。
 
@@ -1188,6 +1332,25 @@ def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float
         sim = difflib.SequenceMatcher(None, str(title).strip().lower(),
                                       re.sub(r"\s+", " ", mt).strip().lower()).ratio()
         if sim < 0.50:
+            # v4.2.0 文字系统守卫（与 DOI 通路同语义；家族铁律：语言差异绝不作
+            # 编造依据）——真网实锤：中文指南 39429074 声称中文题名 vs 登记英文
+            # 题名 sim 0.10 被误判「拼接伪造」。跨族时低相似度不得判死；桥接原料
+            # =登记 DOI（articleids），桥接命中给一致，否则 partial 转人工。
+            _sf_c, _sf_r = _script_family(str(title)), _script_family(mt)
+            if _sf_c != "none" and _sf_r != "none" and _sf_c != _sf_r:
+                reg_doi = ""
+                for a in item.get("articleids") or []:
+                    if (a.get("idtype") or "") == "doi":
+                        reg_doi = a.get("value") or ""
+                        break
+                bridge = (_cross_lingual_bridge(reg_doi, str(title),
+                                                {"title": mt}, timeout)
+                          if reg_doi and DOI_RE.match(reg_doi) else "")
+                if bridge:
+                    return "", (f"PMID 元数据核验一致（跨语言桥接：{bridge}；"
+                                f"登记题名《{mt[:60]}》）"), True
+                return "partial", (f"跨语言标题无法机器比对（声称 {_sf_c} 文 vs 登记 "
+                                   f"{_sf_r} 文,相似度 {sim:.2f}）→ 建议人工核对"), False
             return "invalid", (f"PMID 登记标题相似度仅 {sim:.2f}（登记为《{mt[:60]}》）"
                                "→ 真 PMID 假标题，疑似拼接伪造"), False
         if sim < 0.82:
@@ -2008,16 +2171,26 @@ def parse_markdown_refs(text: str) -> list:
     """v4.0.0 从 markdown「参考文献」节提取 Vancouver 编号条目（医学文档主流形态：
     `1. **作者, et al.** 题名. *期刊*. 年;卷(期):页.`——无 DOI/PMID/URL）。
     提取的条目走 PubMed 题名反查通道（pubmed_title_reverse_lookup）获得官方核验。
-    解析保守：无编号行/段数不足/题名过短的行跳过。"""
+    解析保守：无编号行/段数不足/题名过短的行跳过。
+
+    v4.2.0（GB/T 7714 变体实测扩展）：16 条带内联 PMID 的 GB/T 著录全军覆没驱动——
+    - 编号行支持 `[1] ` 方括号（与 `1. ` 并列，GB/T 最常见变体）；
+    - 标题行支持裸「参考文献」行（无 # 前缀）；
+    - 内联标识符提取：`PMID: 39429074` / `DOI: 10.xxx/yyy` 进 ref 字段——
+      著录里带着官方锚，此前却被当无标识符引用盲查；
+    - 卷(期):页提取 → volume/issue/pages（卷期页锚定通道原料）；
+    - `[J]`/`[EB/OL]` 类型标记剥除；期刊段内「年, 卷(期): 页」残尾清理。"""
     refs = []
-    m = re.search(r"(?:^|\n)#{1,3}\s*(?:\d+[.、]?\s*)?(?:参考文献|References)[^\n]*\n", text)
+    m = re.search(r"(?:^|\n)#{0,3}\s*(?:\d+[.、]?\s*)?(?:参考文献|References)[^\n]*\n", text)
     body = text[m.end():] if m else text
     for raw in body.splitlines():
         line = re.sub(r"\*\*|\*|__|_", "", raw.strip())
-        mm = re.match(r"^(\d{1,3})[.、)]\s+(.{10,})$", line)
+        mm = re.match(r"^(?:\[(\d{1,3})\][.、]?|(\d{1,3})[.、)])\s+(.{10,})$", line)
         if not mm:
             continue
-        rest = mm.group(2).strip()
+        rest = (mm.group(3) or "").strip()
+        if not rest:
+            continue
         segs = [s.strip(" *") for s in re.split(r"\.\s+", rest) if s.strip(" *")]
         if len(segs) < 2:
             continue
@@ -2025,15 +2198,45 @@ def parse_markdown_refs(text: str) -> list:
         ym = re.search(r"(19|20)\d{2}", rest)
         if ym:
             year = int(ym.group(0))
-        if len(segs) >= 3:
+        # 无作者段变体判定：GB/T 允许题名先行著录（`题名[J]. 期刊, 年, 卷(期): 页.`，
+        # 机构共识/指南常见）——segs[0] 以文献类型标记结尾即为题名段
+        if re.search(r"\[[A-Z]{1,2}(?:/OL)?\]\s*$", segs[0] or ""):
+            title, source = segs[0], (segs[1] if len(segs) >= 2 else "")
+        elif len(segs) >= 3:
             title, source = segs[1], segs[2]
         else:
             title, source = segs[0], ""
         if source and re.fullmatch(r"(19|20)\d{2}.*", source):
             source = ""
+        # 访问日期残段（"(2023)[2026-10-05]" 形态）不作期刊名
+        if source and re.match(r"^\((?:19|20)\d{2}\)\[[\d-]+\]$", source):
+            source = ""
         if len(title) < 15:
             continue
-        refs.append({"title": title, "source": source, "year": year})
+        # 文献类型标记剥除（[J]/[EB/OL]/[M]/[C] 等 GB/T 类型码）
+        title = re.sub(r"\[[A-Z]{1,2}(?:/OL)?\]\s*$", "", title).strip()
+        source = re.sub(r"\[[A-Z]{1,2}(?:/OL)?\]\s*$", "", source).strip()
+        # 期刊段残尾清理（"中华儿科杂志, 2024, 62(11): 1030-1042" → 期刊名）
+        source = re.sub(r"[,，]\s*(?:19|20)\d{2}\s*[,，]?.*$", "", source).strip(" .,，")
+        entry = {"title": title, "source": source, "year": year}
+        # 内联标识符提取（authoritative anchor 前置——ref_to_url 已支持 PMID→官方 URL）
+        pm = re.search(r"PMID\s*[:：]?\s*(\d{6,9})", rest, re.I)
+        if pm:
+            entry["pmid"] = pm.group(1)
+        dm = re.search(r"\b(10\.\d{4,9}/[^\s，,;；)]+)", rest)
+        if dm:
+            entry["doi"] = dm.group(1).rstrip(".,;)")
+        # 卷(期):页 锚定在年份之后提取（避免误抓随机数字）。
+        # 实测形态：`2024, 62(11): 1030-1042` / `2014, 134(5): e1474-502` /
+        #           `2020, 8: 218`（无期）/ `2020, 35(12)`（无页）
+        lm = re.search(
+            r"(?:19|20)\d{2}\s*[,，]\s*(\d{1,4})\s*(?:\((\d{1,4})\))?"
+            r"(?:\s*[:：]\s*([A-Za-z]{0,2}\d+[A-Za-z0-9]*))?", rest)
+        if lm:
+            entry["volume"] = lm.group(1)
+            entry["issue"] = lm.group(2) or ""
+            entry["pages"] = lm.group(3) or ""
+        refs.append(entry)
     return refs
 
 
@@ -2100,6 +2303,26 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
                 return out
             if pm_adj == "partial":
                 out.update(verdict="partial", needs_human_check=True)
+                return out
+            # v4.2.0 卷期页锚定（题名反查未命中后的第二无标识符通道）：
+            # 期刊+年+卷(期):页 是 PubMed 官方引文定位器，语言无关——
+            # 中文声称题名 vs 登记题名翻译差异不再阻断核验
+            loc_adj, loc_note, loc_matched, loc_pmid, loc_err = pubmed_locator_lookup(
+                out["source"], ref.get("year"), ref.get("volume"),
+                ref.get("issue"), ref.get("pages"), max(timeout, 15.0),
+                claimed_title=t_claim)
+            out["checks"]["pubmed_locator"] = {
+                "ran": bool(out["source"] and ref.get("volume") and ref.get("year")),
+                "matched": loc_matched, "pmid": loc_pmid or None,
+                "network_error": loc_err}
+            if loc_note:
+                out["note"] = (out["note"] + "；" if out["note"] else "") + loc_note
+            if loc_matched and loc_adj == "":
+                if not out.get("pmid"):
+                    out["pmid"] = loc_pmid
+                out.update(verdict="verified", needs_human_check=False,
+                           note=(out["note"] + "；" if out["note"] else "") +
+                                "无标识符引用经 PubMed 卷期页锚定核验一致，已回填 PMID 锚")
                 return out
             oa_note = openalex_title_check(t_claim, timeout)
             out["checks"]["openalex"] = {"ran": True,
@@ -2269,7 +2492,29 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
                     out.update(verdict="invalid", needs_human_check=True)
                     return out
                 if padj == "partial":
-                    out.update(verdict="partial", needs_human_check=True)
+                    # v4.2.0 跨语言佐证升级：标题不可比（跨文字系统）partial 时，
+                    # 卷期页锚定若唯一命中**同一 PMID**——注册库亲自确认了
+                    # 「该组卷期页 ↔ 该 PMID」，声称引用恰好给出同组定位器，
+                    # 标题差异纯属翻译——证据充分，解除终局 partial 封顶
+                    if "跨语言标题无法机器比对" in pnote and out["source"] \
+                            and ref.get("volume") and ref.get("year"):
+                        la, ln, lm_, lp, le = pubmed_locator_lookup(
+                            out["source"], ref.get("year"), ref.get("volume"),
+                            ref.get("issue"), ref.get("pages"), max(timeout, 15.0),
+                            claimed_title=str(ref.get("title") or ""))
+                        out["checks"]["pubmed_locator"] = {
+                            "ran": True, "matched": lm_, "pmid": lp or None,
+                            "network_error": le}
+                        if ln:
+                            out["note"] = (out["note"] + "；" if out["note"] else "") + ln
+                        if lm_ and str(lp) == str(out["pmid"]):
+                            out["checks"]["pmid_metadata"]["cross_lang_corroborated"] = True
+                            out["note"] = (out["note"] + "；" if out["note"] else "") + \
+                                "跨语言标题经卷期页锚定佐证（同一 PMID 唯一命中）——语言差异不作为编造依据"
+                        else:
+                            out.update(verdict="partial", needs_human_check=True)
+                    else:
+                        out.update(verdict="partial", needs_human_check=True)
         # v1.8 OpenAlex 书目级核查：无 DOI/PMID/arXiv 的引用多一路正面确认信号；
         # v1.10 S2 标题检索为并列第二路（两库收录面不同，互为备份；同样只确认不降级）
         if not out["doi"] and not out["pmid"] and not out["arxiv"]:
@@ -2315,6 +2560,8 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
         out["verdict"] = "partial"
     # v3.4 外部独测合并:PMID 元数据 partial 与 DOI/arXiv 同闸——降级不得被终局覆盖
     if (out.get("checks", {}).get("pmid_metadata", {}) or {}).get("adjust") == "partial" \
+            and not (out.get("checks", {}).get("pmid_metadata", {}) or {}).get(
+                "cross_lang_corroborated") \
             and out["verdict"] == "verified":
         out["verdict"] = "partial"
     # v4.1.0：撤稿族与 EoC 同闸降级（EoC=编辑关注通告，证据效力存疑转人工；
@@ -4386,6 +4633,11 @@ def main() -> int:
             if str(r.get("pmid") or "").strip() or "pubmed" in u.lower():
                 hints = True
                 break
+            # v4.2.0：中文医学注册库升为无条件 journal 层后，「medical 才升层」
+            # 信号对它们失效——改用显式注册库清单计数
+            if re.search(r"(wanfangdata|cnki|yiigle|cqvip)\.", u.lower()):
+                med_hits += 1
+                continue
             try:
                 if classify_tier(u, True) == "journal" and classify_tier(u, False) == "blog":
                     med_hits += 1

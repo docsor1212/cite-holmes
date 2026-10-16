@@ -59,7 +59,7 @@ class TestPubmedTitleReverseLookup(unittest.TestCase):
                              "an American College of Rheumatology/European League "
                              "Against Rheumatism classification criteria",
                     "source": "Arthritis Rheum", "pubdate": "2013 Nov"}})):
-            adj, note, matched, pmid = vr.pubmed_title_reverse_lookup(T, "Arthritis Rheum", 2013, 10.0)
+            adj, note, matched, pmid, net_err = vr.pubmed_title_reverse_lookup(T, "Arthritis Rheum", 2013, 10.0)
         self.assertEqual(adj, "")
         self.assertTrue(matched)
         self.assertEqual(pmid, "24122180")
@@ -72,7 +72,7 @@ class TestPubmedTitleReverseLookup(unittest.TestCase):
                         summaries={"999": {"title": "Mechanisms of Disease Scleroderma Lung",
                                            "source": "X", "pubdate": "2020 Jan"}})
         with unittest.mock.patch("urllib.request.urlopen", side_effect=mock):
-            adj, note, matched, pmid = vr.pubmed_title_reverse_lookup(T, "", 2020, 10.0)
+            adj, note, matched, pmid, net_err = vr.pubmed_title_reverse_lookup(T, "", 2020, 10.0)
         self.assertTrue(matched)
         n_calls = [c for c in mock.calls if c[0] == "esearch"]
         self.assertTrue(any(c[1].count("[Title]") == 3 for c in n_calls),
@@ -81,7 +81,7 @@ class TestPubmedTitleReverseLookup(unittest.TestCase):
     def test_zero_hit_silent(self):
         T = "A Very Unusual Title About Nonexistent Topics Here"
         with unittest.mock.patch("urllib.request.urlopen", side_effect=NCBIMock(default_ids=[])):
-            adj, note, matched, pmid = vr.pubmed_title_reverse_lookup(T, "", 2020, 10.0)
+            adj, note, matched, pmid, net_err = vr.pubmed_title_reverse_lookup(T, "", 2020, 10.0)
         self.assertEqual(adj, "")
         self.assertFalse(matched)
 
@@ -89,13 +89,13 @@ class TestPubmedTitleReverseLookup(unittest.TestCase):
         # 审计要求:限流可观测——「没搜成」≠「搜了没命中」
         err = urllib.error.HTTPError("u", 429, "rate", {}, io.BytesIO(b""))
         with unittest.mock.patch("urllib.request.urlopen", side_effect=err):
-            adj, note, matched, pmid = vr.pubmed_title_reverse_lookup(
+            adj, note, matched, pmid, net_err = vr.pubmed_title_reverse_lookup(
                 "A Title Long Enough For Lookup Testing", "", 2020, 10.0)
         self.assertIn("限流", note)
         self.assertFalse(matched)
 
     def test_short_title_skipped(self):
-        adj, note, matched, pmid = vr.pubmed_title_reverse_lookup("Short", "", 2020, 10.0)
+        adj, note, matched, pmid, net_err = vr.pubmed_title_reverse_lookup("Short", "", 2020, 10.0)
         self.assertFalse(matched)
 
     def test_sim_jaccard_wordset_on_raw(self):
@@ -155,8 +155,8 @@ class TestWiringAndVersion(unittest.TestCase):
         self.assertIn('path.lower().endswith((".md", ".markdown"))', src)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "4.0.0")
-        self.assertIn("version: 4.0.0",
+        self.assertEqual(vr.VERSION, "4.1.0")
+        self.assertIn("version: 4.1.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
     def test_version_scheme_rule(self):

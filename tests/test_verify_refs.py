@@ -276,7 +276,7 @@ class TestV140(unittest.TestCase):
         self.assertTrue(os.path.exists(os.path.join(self.tmp, "r.csv")), "easy 应自动导出 csv")
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "4.0.0")
+        self.assertEqual(vr.VERSION, "4.1.0")
 
 
 class TestHardening(unittest.TestCase):
@@ -1160,7 +1160,7 @@ class TestV170(unittest.TestCase):
         self.assertFalse(os.path.exists(os.path.join(self.tmp, "report.json")) is False)
 
     def test_version_bumped_170(self):
-        self.assertEqual(vr.VERSION, "4.0.0")
+        self.assertEqual(vr.VERSION, "4.1.0")
 
 
 class TestV180(unittest.TestCase):
@@ -1192,8 +1192,12 @@ class TestV180(unittest.TestCase):
         ]}}).encode()
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self.Resp(body)):
-            retracted, note = vr.crossref_retraction_check("10.1000/retracted", 5)
-        self.assertTrue(retracted)
+            ret = vr.crossref_retraction_check("10.1000/retracted", 5)
+        self.assertTrue(ret["retracted"])
+        self.assertEqual(ret["nature"], "retraction")
+        self.assertEqual(ret["notice_doi"], "10.1111/retract")
+        note = vr._retraction_nature_note(ret["nature"], ret["when"],
+                                          ret["notice_doi"], "Crossref/Retraction Watch")
         self.assertIn("已撤稿", note)
         self.assertIn("不得作为有效证据", note)
 
@@ -1203,17 +1207,18 @@ class TestV180(unittest.TestCase):
         ]}}).encode()
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         return_value=self.Resp(body)):
-            retracted, note = vr.crossref_retraction_check("10.1000/corrected", 5)
-        self.assertFalse(retracted)
-        self.assertEqual(note, "")
+            ret = vr.crossref_retraction_check("10.1000/corrected", 5)
+        self.assertFalse(ret["retracted"])
+        # v4.1.0：更正通告分档可见（原二元判定静默丢弃）
+        self.assertEqual(ret["nature"], "correction")
 
     def test_crossref_failure_silent(self):
         with unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         side_effect=vr.urllib.error.HTTPError(
                                             "u", 500, "boom", None, None)):
-            retracted, note = vr.crossref_retraction_check("10.1000/x", 5)
-        self.assertFalse(retracted)
-        self.assertEqual(note, "")
+            ret = vr.crossref_retraction_check("10.1000/x", 5)
+        self.assertFalse(ret["retracted"])
+        self.assertFalse(ret["check_failed"])  # HTTPError 不算传输失败
 
     def test_verify_one_retracted_doi_capped_partial(self):
         # 撤稿论文真实存在（可达+权威层+字段全）但必须封顶 partial 转人工复核
@@ -1385,7 +1390,7 @@ class TestV180(unittest.TestCase):
         self.assertTrue(r["needs_human_check"])
 
     def test_version_bumped_180(self):
-        self.assertEqual(vr.VERSION, "4.0.0")
+        self.assertEqual(vr.VERSION, "4.1.0")
 
 
 class TestV190(unittest.TestCase):
@@ -1441,7 +1446,7 @@ class TestV190(unittest.TestCase):
     # ---------- S2 第三源交叉确认 ----------
 
     def test_version_bumped_190(self):
-        self.assertEqual(vr.VERSION, "4.0.0")
+        self.assertEqual(vr.VERSION, "4.1.0")
 
     def test_s2_confirms_and_rescues_403_landing(self):
         # DOI.org 元数据获取失败（传输错误×2）→ S2 确认存在 → 着陆页 403 救回 verified

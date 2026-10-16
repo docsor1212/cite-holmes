@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "4.0.0"
+VERSION = "4.1.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -247,7 +247,7 @@ def render_bluf_dict(results: list, scorecard: dict) -> dict:
         blocker = "无"
         action = "可直接 --export bibtex 导出参考文献"
     _retr = sum(1 for r in results
-                if "撤稿" in str((r.get("checks") or {}).get("retraction") or ""))
+                if ((r.get("checks") or {}).get("retraction") or {}).get("retracted"))
     _rev = sum(1 for r in results if r.get("needs_human_check"))
     kn = (f"CiteScore {scorecard['score']}/100 ({scorecard['grade']}), "
           f"verified {c['verified']}/{n}, invalid {c['invalid']}, "
@@ -811,25 +811,55 @@ def _ncbi_rate_wait():
         _NCBI_LAST[0] = time.time()
 
 
+def _urlopen_retry(req, timeout: float, attempts: int = 3, backoff: float = 1.5):
+    """v4.1.0 传输层重试（与 pmid_doi_crosscheck v3.3.0 同标准，收拢为公共助手）。
+
+    只重试传输类异常（URLError/超时/SSL 握手失败——代理抖动/TUN 环境实测高频）；
+    HTTPError 是服务器已应答（429/404/403），绝不重试，由调用方走各自可观测路径。
+    全部 attempts 耗尽后抛出最后一次异常——调用方负责把「传输失败」与「查无」
+    区分开（2026-10-16 实测事故：传输失败曾被当成查无 → 12+ 条真文献被报 unverified）。
+    """
+    last_exc = None
+    for attempt in range(attempts):
+        try:
+            return urllib.request.urlopen(req, timeout=timeout)
+        except urllib.error.HTTPError:
+            raise
+        except Exception as e:
+            last_exc = e
+            if attempt + 1 < attempts:
+                time.sleep(backoff * (attempt + 1))
+    raise last_exc
+
+
 def pubmed_title_reverse_lookup(title: str, source: str, year,
                                 timeout: float) -> tuple:
     """v4.0.0 Vancouver 医学引用的 PubMed 题名反查（无标识符引用的官方核验通道）。
 
     医学文档参考文献的主流形态是 Vancouver 纯文本（作者. 题名. 期刊. 年;卷(期):页.），
     无 DOI/PMID/URL——此前只能走 OpenAlex/S2 标题确认（只确认不升级，unverified 转人工）。
-    本通道用 E-utilities esearch 题名精确短语 → 候选 PMID → esummary 官方元数据 →
+    本通道用 E-utilities esearch 题名实词组合 → 候选 PMID → esummary 官方元数据 →
     标题相似度+年份+期刊三重比对，命中即给「官方注册库核验一致」判定并回填 PMID 锚。
 
-    返回 (adjust, note, matched, pmid)：
-      adjust=""  且 matched=True  → 反查一致（调用方可升 verified）
-      adjust="partial"            → 近似命中（转人工）
-      adjust=""   且 matched=False → 未命中（静默：查无≠编造，调用方继续现有通道——
-                                    PubMed 收录面为生物医学/生命科学，中文文献/
-                                    非生物医学引用未命中属预期）
+    v4.1.0：
+      - 短题名支持：实词 ≥2 即检索（原 <3 静默跳过——"Scleroderma in children"
+        类规范短题名漏检；[Title] 限定+相似度阈值守精度）；
+      - 传输失败可观测：esearch/esummary 传输异常走 _urlopen_retry（3 次退避），
+        仍失败返回 net_err=True——「网络没搜成」绝不伪装成「搜了没有」（2026-10-16
+        实测事故：代理抖动致 12+ 条真文献被报 unverified 且无任何痕迹）。
+
+    返回 (adjust, note, matched, pmid, net_err)：
+      adjust=""  且 matched=True      → 反查一致（调用方可升 verified）
+      adjust="partial"                → 近似命中（转人工）
+      adjust=""   且 matched=False    → 未命中（静默：查无≠编造，调用方继续现有
+                                        通道——PubMed 收录面为生物医学/生命科学，
+                                        中文文献/非生物医学引用未命中属预期）
+      net_err=True                    → 传输失败（检索未完成），note 已带说明；
+                                        查无与失败必须可区分
     判定语义遵循家族铁律：查无永不判死；只升不降。"""
     q = (title or "").strip()
     if len(q) < 20:  # 题名过短，检索噪声过大
-        return "", "", False, ""
+        return "", "", False, "", False
     # 检索构造（实测定标 2026-10-14）：整题名短语 [Title] 对含标点长题名零命中
     # （PubMed phrase 索引 tokenize 问题）——改用区分性实词 AND 组合：
     # 题名实词按长度降序取 5 个，逐词 [Title] AND（真身命中验证：
@@ -841,26 +871,25 @@ def pubmed_title_reverse_lookup(title: str, source: str, year,
     words = [w for w in re.findall(r"[A-Za-z\u4e00-\u9fff0-9]{2,}", q)
              if w.lower() not in stop]
     words.sort(key=len, reverse=True)
-    if len(words) < 3:
-        return "", "", False, ""
-    # 词数递减重试（5→4→3）：过严组合零命中时逐步放宽（实测 5 词 AND 可对
-    # 长题名零命中，同题 4 词命中）
-    # 词数递减收集全轮候选（5→4→3）：不因某轮有命中而停——4 词轮可能只命中
+    if len(words) < 2:  # v4.1.0：<3 → ≥2（短题名规范文献反查，如 "Scleroderma in children"）
+        return "", "", False, "", False
+    # 词数递减收集全轮候选（5→4→3→2）：不因某轮有命中而停——4 词轮可能只命中
     # 高频词杂讯而真身在 3 词轮（实测 #5 短题名场景）；esummary 统一比对
     ids_all = []
-    for nwords in (5, 4, 3):
+    net_err = False
+    for nwords in (5, 4, 3, 2):
         if len(words) < nwords:
             continue
         term = " AND ".join(f"{w}[Title]" for w in words[:nwords])
         u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
              + _ncbi_qs(f"?db=pubmed&retmode=json&retmax=8&sort=relevance&term={quote(term)}"))
         if _cb_open(u):
-            return "", "", False, ""
+            return "", "", False, "", False
         _ncbi_rate_wait()
         try:
             req = urllib.request.Request(
                 u, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            with _urlopen_retry(req, timeout) as resp:
                 j = json.loads(resp.read().decode("utf-8", "ignore"))
             _cb_record(u, False)
             got = [str(x) for x in ((j.get("esearchresult") or {}).get("idlist") or [])]
@@ -868,36 +897,42 @@ def pubmed_title_reverse_lookup(title: str, source: str, year,
             _cb_record(u, False)
             # 限流可观测：429/403 让调用方知道「没搜成」而非「搜了没命中」
             return "", (f"PubMed 反查限流（HTTP {e.code}）——建议 NCBI_API_KEY 或分批"
-                        if e.code in (429, 403) else ""), False, ""
+                        if e.code in (429, 403) else ""), False, "", False
         except Exception:
             _cb_record(u, True)
-            return "", "", False, ""
+            # v4.1.0：传输失败（重试后仍不通）可观测——绝不与「查无」混淆
+            net_err = True
+            break
         ids_all.extend(got)
         if len(got) >= 8:  # 满额命中：该轮已是最优粒度，停
             break
     ids = list(dict.fromkeys(ids_all))
     if not ids:
-        return "", "", False, ""
+        if net_err:
+            return "", ("PubMed 反查未完成（网络传输失败，已重试）——非查无；"
+                        "网络恢复后复跑可完成核验"), False, "", True
+        return "", "", False, "", False
     ids = ids[:24]
     u2 = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
           + _ncbi_qs(f"?db=pubmed&retmode=json&id={','.join(ids)}"))
     if _cb_open(u2):
-        return "", "", False, ""
+        return "", "", False, "", False
     _ncbi_rate_wait()
     try:
         req = urllib.request.Request(
             u2, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen_retry(req, timeout) as resp:
             _cb_record(u2, False)
             j2 = json.loads(resp.read().decode("utf-8", "ignore"))
     except urllib.error.HTTPError as e:
         _cb_record(u2, False)
         # 审计 P3:esummary 限流与 esearch 同款可观测
         return "", (f"PubMed 反查限流（HTTP {e.code}）" if e.code in (429, 403)
-                    else ""), False, ""
+                    else ""), False, "", False
     except Exception:
         _cb_record(u2, True)
-        return "", "", False, ""
+        return "", ("PubMed 反查未完成（网络传输失败，已重试）——非查无；"
+                    "网络恢复后复跑可完成核验"), False, "", True
     def _title_sim(a: str, b: str) -> float:
         """题名比对双通道取 max：序列相似度（SequenceMatcher）+ 词集 Jaccard。
         后者对「登记版题名词序重排」鲁棒——ACR/EULAR 分类标准登记题名把年份
@@ -939,14 +974,14 @@ def pubmed_title_reverse_lookup(title: str, source: str, year,
         sim, pid, mt, ms, my = best
         note = (f"PubMed 题名反查核验一致（PMID:{pid}；登记题名《{mt[:60]}》"
                 f"{'·' + ms if ms else ''}{'·' + str(my) if my else ''}）")
-        return "", note, True, pid
+        return "", note, True, pid, False
     if best and best[0] >= 0.50:
         sim, pid, mt, ms, my = best
         return ("partial",
                 f"PubMed 题名反查近似命中（PMID:{pid}，相似度 {sim:.2f}，"
                 f"登记题名《{mt[:60]}》）→ 人工核对是否同一篇",
-                True, pid)
-    return "", "", False, ""
+                True, pid, False)
+    return "", "", False, "", False
 
 
 def pubmed_pmid_exists(pmid: str, timeout: float) -> tuple:
@@ -1484,47 +1519,110 @@ def _retraction_local(doi: str):
     return _RETRACTION_CACHE[0].get(doi.strip().lower())
 
 
-def crossref_retraction_check(doi: str, timeout: float) -> tuple:
+def _retraction_classify(raw_type: str) -> str:
+    """v4.1.0 撤稿通告类型归一化（Crossref updated-by type 与 RWDB dump 字符串
+    两种来源统一到六类）。返回 ∈ {"retraction", "partial_retraction", "withdrawal",
+    "expression_of_concern", "correction", ""}（未识别返回小写原文，调用方按
+    未分档处理——查无永不判死同样适用于「不认识的通告类型」）。"""
+    t = (raw_type or "").strip().lower().replace("-", "_").replace(" ", "_")
+    if t in ("retraction", "retraction_notice", "retract_and_republish",
+             "retraction_of_publication"):
+        return "retraction"
+    if t in ("partial_retraction", "partial_retraction_notice"):
+        return "partial_retraction"
+    if t in ("withdraw", "withdrawal", "remove", "removal"):
+        return "withdrawal"
+    if t in ("expression_of_concern", "expressions_of_concern"):
+        return "expression_of_concern"
+    if t in ("correction", "erratum", "corrigendum", "amendment"):
+        return "correction"
+    return t
+
+
+def _retraction_nature_note(nature: str, when: str, notice: str,
+                            source_label: str) -> str:
+    """v4.1.0 按通告分档生成中文注记（降级语义由调用方统一接线）。"""
+    when_note = f"（{when}）" if when else ""
+    extra = f"，通告 {notice}" if notice else ""
+    if nature == "retraction":
+        return (f"论文已撤稿（{source_label}{when_note}{extra}）"
+                "→ 不得作为有效证据引用")
+    if nature == "partial_retraction":
+        return (f"论文部分撤稿（{source_label}{when_note}{extra}）——撤稿部分"
+                "不得作为证据，请人工核对结论边界")
+    if nature == "withdrawal":
+        return (f"论文已被出版方撤回（{source_label}{when_note}{extra}）"
+                "→ 不得作为有效证据引用")
+    if nature == "expression_of_concern":
+        return (f"该文存在编辑关注通告 Expression of Concern"
+                f"（{source_label}{when_note}{extra}）——证据效力存疑，转人工复核")
+    if nature == "correction":
+        return (f"该文存在更正/勘误通告（{source_label}{when_note}{extra}）"
+                "——仅提示引用时留意勘误内容，不影响有效性判定")
+    return f"存在出版方通告（{nature}，{source_label}{when_note}{extra}）"
+
+
+def crossref_retraction_check(doi: str, timeout: float) -> dict:
     """v1.8 撤稿检测：Crossref REST API（Retraction Watch 数据，免费/每日更新）。
     v3.2.0：--retraction-cache 配置本地索引(GitLab 官方 dump 构建)时先查本地
     (零网络/离线可用),未命中再走网络拿最新状态。
-    判定：works 记录的 updated-by 列表中存在 type=="retraction" → 已撤稿。
-    查询失败一律静默跳过（绝不因检查失败惩罚引用）。返回 (retracted, note)。"""
+    v4.1.0 通告分档：updated-by/type 细分（撤稿/部分撤稿/撤回/EoC/更正）——
+    原二元判定对「编辑关注通告」完全漏抓（医学场景 EoC 论文不应继续当作
+    干净证据引用；JMIR 2026 实证 AI 工具单靠自身抓不全撤稿文献）。
+    查询失败一律静默跳过（绝不因检查失败惩罚引用）——但 v4.1.0 起
+    check_failed=True 可观测（传输失败≠「干净」，报告层注明检查未完成）。
+
+    返回 dict：{"retracted": bool,            # 撤稿族（retraction/partial/withdrawal）
+                "nature": str,                # 六类分档（_retraction_classify）
+                "notice_doi": str, "when": str,
+                "source": "local"|"crossref"|"",
+                "check_failed": bool}         # 传输失败（重试耗尽）——非「未撤稿」"""
+    failed = {"retracted": False, "nature": "", "notice_doi": "", "when": "",
+              "source": "", "check_failed": True}
+    clean = {"retracted": False, "nature": "", "notice_doi": "", "when": "",
+             "source": "", "check_failed": False}
     hit = _retraction_local(doi)
     if hit is not None:
         raw_date = (hit.get("date") or "").split(" 0:00")[0]  # CSV 时间残渣剥除
-        when = f"（{raw_date}）" if raw_date else ""
-        nature = hit.get("type") or "Retraction"
-        return True, (f"论文已撤稿（本地 Retraction Watch 索引{when}，{nature}）"
-                      "→ 不得作为有效证据引用")
+        nature = _retraction_classify(hit.get("type") or "Retraction")
+        family = nature in ("retraction", "partial_retraction", "withdrawal")
+        return {"retracted": family, "nature": nature,
+                "notice_doi": "", "when": raw_date, "source": "local",
+                "check_failed": False}
     mailto = _OPTS.get("mailto") or ""
     url = f"https://api.crossref.org/works/{quote(doi, safe='()/')}"
     if mailto:
         url += f"?mailto={quote(mailto, safe='@')}"
     if _cb_open(url):
-        return False, ""
+        return dict(clean)
     try:
         req = urllib.request.Request(
             url, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research "
                                         "(https://skillhub.cn/skills/cite-holmes)"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        with _urlopen_retry(req, timeout) as resp:
             m = (json.loads(resp.read().decode("utf-8", "ignore")) or {}).get("message") or {}
         _cb_record(url, False)
         for item in m.get("updated-by") or []:
-            if isinstance(item, dict) and item.get("type") == "retraction":
-                notice = item.get("DOI") or ""
-                when = ((item.get("updated") or {}).get("date-time") or "")[:10]
-                extra = f"，撤稿通知 {notice}" if notice else ""
-                when_note = f"（{when}）" if when else ""
-                return True, (f"论文已撤稿（Crossref/Retraction Watch{when_note}{extra}）"
-                              "→ 不得作为有效证据引用")
-        return False, ""
+            if not isinstance(item, dict):
+                continue
+            nature = _retraction_classify(item.get("type") or "")
+            if not nature:
+                continue
+            notice = item.get("DOI") or ""
+            when = ((item.get("updated") or {}).get("date-time") or "")[:10]
+            if nature in ("retraction", "partial_retraction", "withdrawal"):
+                return {"retracted": True, "nature": nature, "notice_doi": notice,
+                        "when": when, "source": "crossref", "check_failed": False}
+            # EoC/更正：不升级为 retracted，但分档记录（EoC 由调用方降级转人工）
+            clean.update(nature=nature, notice_doi=notice, when=when,
+                         source="crossref")
+        return dict(clean)
     except urllib.error.HTTPError:
-        _cb_record(url, True, degrade=False)  # 站点有响应（含 429 限流）：不计入全局降级
-        return False, ""
+        _cb_record(url, False, degrade=False)  # 站点有响应（含 429 限流）：不计入全局降级
+        return dict(clean)
     except Exception:
         _cb_record(url, True)
-        return False, ""
+        return dict(failed)
 
 
 def openalex_title_check(title: str, timeout: float) -> str:
@@ -1977,7 +2075,7 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
             # v4.0.0 Vancouver 医学引用的官方核验通道（PubMed 题名反查）——
             # 置于 OpenAlex/S2 之前：它是唯一能给出「官方一致→verified」的无
             # 标识符通道；未命中静默，继续现有确认路径（只确认不降级不变）
-            pm_adj, pm_note, pm_matched, rev_pmid = pubmed_title_reverse_lookup(
+            pm_adj, pm_note, pm_matched, rev_pmid, pm_net_err = pubmed_title_reverse_lookup(
                 t_claim, str(ref.get("source") or ""), ref.get("year"),
                 max(timeout, 20.0))  # 反查=esearch+esummary 两跳，单跳超时给足
             _eutils_open = any(d.get("open") for hk, d in _CB.items()
@@ -1986,7 +2084,9 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
                 "ran": True, "matched": pm_matched,
                 "pmid": rev_pmid or None,
                 "skipped_by_circuit": (not pm_matched and not pm_note
-                                       and _eutils_open)}
+                                       and _eutils_open),
+                # v4.1.0：传输失败与查无必须可区分（报告层按此注明「核验未完成」）
+                "network_error": pm_net_err}
             if pm_note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + pm_note
             if pm_matched and pm_adj == "":
@@ -2060,11 +2160,25 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
                 if s2note:
                     out["note"] = (out["note"] + "；" if out["note"] else "") + s2note
             # v1.8 撤稿检测：真实存在的论文也可能是撤稿状态，不得作为有效证据
-            retracted, retnote = crossref_retraction_check(out["doi"], timeout)
-            out["checks"]["retraction"] = {"retracted": retracted}
+            # v4.1.0 分档：撤稿族降级转人工；EoC 同闸转人工；更正仅提示；
+            # check_failed=True 可观测（传输失败≠「未撤稿」，报告层注明）
+            ret = crossref_retraction_check(out["doi"], timeout)
+            retracted = bool(ret.get("retracted"))
+            out["checks"]["retraction"] = ret
+            if ret.get("nature"):
+                retnote = _retraction_nature_note(
+                    ret["nature"], ret["when"], ret["notice_doi"],
+                    "本地 Retraction Watch 索引" if ret.get("source") == "local"
+                    else "Crossref/Retraction Watch")
+            elif ret.get("check_failed"):
+                retnote = ("撤稿检查未完成（网络传输失败，重试后仍不通）——"
+                           "本条结果不含撤稿核验，非「未撤稿」")
+            else:
+                retnote = ""
             if retnote:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + retnote
-                out["needs_human_check"] = True
+                if retracted:  # EoC 的转人工在统一降级闸处理；更正提示不强制转人工
+                    out["needs_human_check"] = True
         # 带 arXiv ID 的引用同层核验（无 DOI 时）：官方 API 查无记录 → 直接 invalid，
         # 同样先于可达性检查，避免假 ID 被误判为 unreachable（v1.5）
         elif out["arxiv"]:
@@ -2108,7 +2222,9 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
                     out["verdict"] = "verified"
                 else:
                     out["verdict"] = "partial"
-                if retracted and out["verdict"] == "verified":
+                # v4.1.0：撤稿族与 EoC 同闸——反爬救回不得把带通告的文献盖成 verified
+                if (retracted or (out["checks"].get("retraction") or {}).get("nature")
+                        == "expression_of_concern") and out["verdict"] == "verified":
                     out["verdict"] = "partial"
                     out["needs_human_check"] = True
                 return out
@@ -2201,8 +2317,16 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
     if (out.get("checks", {}).get("pmid_metadata", {}) or {}).get("adjust") == "partial" \
             and out["verdict"] == "verified":
         out["verdict"] = "partial"
-    if retracted and out["verdict"] == "verified":
+    # v4.1.0：撤稿族与 EoC 同闸降级（EoC=编辑关注通告，证据效力存疑转人工；
+    # 更正/勘误不降级——仅提示注记）
+    _ret_chk = out.get("checks", {}).get("retraction") or {}
+    if (retracted or _ret_chk.get("nature") == "expression_of_concern") \
+            and out["verdict"] == "verified":
         out["verdict"] = "partial"
+        out["needs_human_check"] = True
+    elif _ret_chk.get("nature") == "expression_of_concern":
+        # EoC 落在其他 partial 路径（层级/缺字段）也要挂人工旗——复核计数口径
+        # 与撤稿族一致，注记说「转人工」旗标必须真挂（审计 P3-1）
         out["needs_human_check"] = True
     # offline 模式只做结构核验（格式/字段/层级/去重），可达性未验证——
     # 诚实起见 verified 封顶为 partial（避免离线盖章"已验证"）
@@ -3215,6 +3339,7 @@ def derive_error_codes(r: dict) -> list:
       E_PMID_NOT_FOUND  PMID E-utilities 查无
       E_STITCHED        DOI/PMID 拼接(两键各真但指向不同论文)
       E_RETRACTED       已撤稿(Crossref/Retraction Watch)
+      E_EXPRESSION_OF_CONCERN  编辑关注通告(EoC)——降级转人工(v4.1.0)
       E_AUTHOR_MISMATCH 作者姓氏与登记不符
       E_JOURNAL_MISMATCH 期刊名与登记不符
       E_UNREACHABLE     来源抓取失败(超时/反爬/网络)——不等于不存在
@@ -3242,6 +3367,8 @@ def derive_error_codes(r: dict) -> list:
         codes.append("E_PMID_NOT_FOUND")
     if (c.get("retraction") or {}).get("retracted"):
         codes.append("E_RETRACTED")
+    if (c.get("retraction") or {}).get("nature") == "expression_of_concern":
+        codes.append("E_EXPRESSION_OF_CONCERN")
     if "作者" in note and ("不符" in note or "不一致" in note):
         codes.append("E_AUTHOR_MISMATCH")
     if "期刊名不符" in note or "期刊" in note and "不符" in note:
@@ -3634,7 +3761,27 @@ def render_html(results: list, offline: bool, profile: str = "general",
         if c.get("s2"):
             seg.append("S2 ✓" if c["s2"].get("matched") else "S2 ·")
         if c.get("retraction"):
-            seg.append("撤稿库 ✓" if not c["retraction"].get("retracted") else "撤稿⚠")
+            # v4.1.0 分档展示：撤稿族⚠/EoC⚠/更正ℹ/检查未完成✗（失败不冒充干净）
+            r = c["retraction"]
+            if r.get("retracted"):
+                seg.append("撤稿⚠")
+            elif r.get("nature") == "expression_of_concern":
+                seg.append("EoC⚠")
+            elif r.get("nature") == "correction":
+                seg.append("更正ℹ")
+            elif r.get("check_failed"):
+                seg.append("撤稿检查✗")
+            else:
+                seg.append("撤稿库 ✓")
+        if c.get("pubmed_reverse"):
+            # v4.1.0：反查三态（命中✓/未命中·/传输失败✗）——失败不冒充查无
+            pr = c["pubmed_reverse"]
+            if pr.get("network_error"):
+                seg.append("反查✗")
+            elif pr.get("matched"):
+                seg.append("反查✓")
+            else:
+                seg.append("反查·")
         if c.get("openalex"):
             seg.append("OpenAlex ✓" if c["openalex"].get("confirmed") else "OpenAlex ·")
         if c.get("url"):
@@ -3898,6 +4045,7 @@ _ERR_CODE_ZH = {
     "E_PMID_NOT_FOUND": "PMID 在 PubMed E-utilities 查无",
     "E_STITCHED": "标识符拼接嫌疑（两键各真但疑似指向不同论文）",
     "E_RETRACTED": "命中撤稿记录（Crossref/Retraction Watch）",
+    "E_EXPRESSION_OF_CONCERN": "编辑关注通告（Expression of Concern）——证据效力存疑，转人工",
     "E_AUTHOR_MISMATCH": "作者姓氏与登记列表不符",
     "E_JOURNAL_MISMATCH": "期刊名与登记不符",
     "E_UNREACHABLE": "来源抓取失败（超时/反爬/网络）——不等于不存在",

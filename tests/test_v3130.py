@@ -96,8 +96,8 @@ class TestCalibrateAndMeta(unittest.TestCase):
         self.assertIn("docs/adr/", sk)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "4.0.0")
-        self.assertIn("version: 4.0.0",
+        self.assertEqual(vr.VERSION, "4.1.0")
+        self.assertIn("version: 4.1.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
 

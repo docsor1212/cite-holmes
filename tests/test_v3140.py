@@ -103,7 +103,7 @@ class TestSkillSlimDown(unittest.TestCase):
         zh = open(os.path.join(SK, "SKILL_ZH.md"), encoding="utf-8").read()
         for kw in ("克隆引用对检测", "跨语言标题桥接", "清单画像", "预印本升级提示",
                    "导出完整度评分", "--doctor", "--preset submission", "--explain",
-                   "--grill report.json", "11 类机器可读错误码"):
+                   "--grill report.json", "12 类机器可读错误码"):
             self.assertIn(kw, zh, kw)
 
     def test_registry_domains_in_security_summary(self):
@@ -125,8 +125,8 @@ class TestSkillSlimDown(unittest.TestCase):
         self.assertEqual(seg.count("return 2"), 3)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "4.0.0")
-        self.assertIn("version: 4.0.0",
+        self.assertEqual(vr.VERSION, "4.1.0")
+        self.assertIn("version: 4.1.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
 

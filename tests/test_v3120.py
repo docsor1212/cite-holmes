@@ -171,13 +171,13 @@ class TestDocsUsability(unittest.TestCase):
         self.assertIn("绕过磁盘缓存读", src)  # B-1:副作用提示
 
     def test_error_code_count_11(self):
-        # 审计 B-2 回归锁:文档说 11 类,翻译表恰好 11 码
+        # 审计 B-2 回归锁:文档说 N 类,翻译表恰好 N 码（v4.1.0 起 12 类+EOC）
         t = open(os.path.join(HERE, "..", "SKILL_ZH.md"), encoding="utf-8").read()
-        self.assertIn("11 类机器可读错误码", t)
-        self.assertEqual(len(vr._ERR_CODE_ZH), 11)
+        self.assertIn("12 类机器可读错误码", t)
+        self.assertEqual(len(vr._ERR_CODE_ZH), 12)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "4.0.0")
+        self.assertEqual(vr.VERSION, "4.1.0")
 
 
 if __name__ == "__main__":

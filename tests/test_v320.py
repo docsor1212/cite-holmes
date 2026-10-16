@@ -94,8 +94,12 @@ class TestRetractionLocalCache(unittest.TestCase):
         vr._OPTS["retraction_cache"] = path
         with mock.patch.object(vr.urllib.request, "urlopen",
                                side_effect=AssertionError("不该走网络")):
-            r, note = vr.crossref_retraction_check("10.1000/X", 5)  # 大小写不敏感
-        self.assertTrue(r)
+            ret = vr.crossref_retraction_check("10.1000/X", 5)  # 大小写不敏感
+        self.assertTrue(ret["retracted"])
+        self.assertEqual(ret["nature"], "retraction")  # v4.1.0 分档
+        self.assertEqual(ret["source"], "local")
+        note = vr._retraction_nature_note(ret["nature"], ret["when"],
+                                          ret["notice_doi"], "本地 Retraction Watch 索引")
         self.assertIn("本地 Retraction Watch", note)
 
     def test_t7_miss_falls_to_network(self):
@@ -116,8 +120,9 @@ class TestRetractionLocalCache(unittest.TestCase):
         with mock.patch.object(vr.urllib.request, "urlopen", side_effect=fake), \
              mock.patch.object(vr, "_cb_open", return_value=False), \
              mock.patch.object(vr, "_cb_record"):
-            r, note = vr.crossref_retraction_check("10.9999/miss", 5)
-        self.assertFalse(r)
+            ret = vr.crossref_retraction_check("10.9999/miss", 5)
+        self.assertFalse(ret["retracted"])
+        self.assertFalse(ret["check_failed"])  # HTTPError=服务器应答，非传输失败
 
     def test_t8_bad_cache_file_no_crash(self):
         """坏缓存文件=视为空,不炸主流程,回退网络。"""
@@ -134,8 +139,8 @@ class TestRetractionLocalCache(unittest.TestCase):
         with mock.patch.object(vr.urllib.request, "urlopen", side_effect=fake), \
              mock.patch.object(vr, "_cb_open", return_value=False), \
              mock.patch.object(vr, "_cb_record"):
-            r, _ = vr.crossref_retraction_check("10.1/y", 5)
-        self.assertFalse(r)
+            ret = vr.crossref_retraction_check("10.1/y", 5)
+        self.assertFalse(ret["retracted"])
 
     def test_t9_unconfigured_none(self):
         vr._OPTS.pop("retraction_cache", None)

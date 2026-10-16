@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 4.0.0
+version: 4.1.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -112,12 +112,13 @@ dual-reader header** + **CiteScore** (0-100 + A-D grade) + a one-line
 
 | Capability | Boundary |
 |---|---|
-| Registry consistency (title/year/journal/author) | 11 machine-readable error codes; thresholds 0.50/0.82 |
+| Registry consistency (title/year/journal/author) | 12 machine-readable error codes; thresholds 0.50/0.82 |
 | Clone-pair detection | same title under different DOIs / one DOI with different titles — paired leads, never verdicts |
 | Cross-lingual title bridging | six writing-system families (Latin/Cyrillic/Greek/Han/Kana/Hangul); hit→`verified`, miss→`partial`; language difference is never fabrication evidence; families outside the six (Arabic/Hebrew/Thai…) do NOT trigger the guard yet — attach an English/romanized title |
 | Bibliography profiling | list-level batch-fabrication fingerprints — review leads, never verdicts |
 | Preprint upgrade hints | arXiv-only refs since published get the formal DOI annotated |
-| Retraction checks | Crossref online, or offline via `--retraction-cache` |
+| Retraction checks | Crossref online, or offline via `--retraction-cache`; notice granularity: retraction / partial retraction / withdrawal → human hand-off, Expression of Concern → caps `verified` at `partial`, correction → note only; a failed check is flagged, never reported as clean |
+| Identifier-less references (Vancouver) | PubMed title reverse-lookup → `verified` with PMID anchor back-filled; works from 2 content words; a transport failure is marked `network_error` and never counted as a miss |
 | Wayback archive links | attached to dead links automatically |
 | Completeness scoring | how many export fields the registry CSL can back-fill |
 | Speed | 20-ref mixed list ≈18s at `--workers 4` (default), ≈7s cache-warm, ≈47s serial — measured table: `references/verification-details.md` |

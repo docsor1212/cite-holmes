@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 4.2.0
+version: 4.3.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -121,6 +121,8 @@ dual-reader header** + **CiteScore** (0-100 + A-D grade) + a one-line
 | Identifier-less references (Vancouver) | PubMed title reverse-lookup → `verified` with PMID anchor back-filled; works from 2 content words; a transport failure is marked `network_error` and never counted as a miss |
 | GB/T 7714 Chinese medical references | `[1]`-style bracket numbering and title-first entries parse; inline `PMID:`/`DOI:` anchors are extracted and verified; when no ID exists, journal+year+volume(issue):page uniquely located in PubMed upgrades to `verified` (Single-Citation-Matcher semantics, language-independent — a Chinese claimed title against an English registered title never counts as fabrication) |
 | Chinese scholarly registries | wanfangdata / CNKI / yiigle classified at journal tier |
+| Non-MEDLINE journals (identifier-less) | OpenAlex anchor search → DOI resolution: the aggregator is only an index, the verdict evidence comes entirely from the DOI registry (retraction checks still run on the anchored DOI) |
+| Retraction checks at scale | `tools/build_retraction_cache.py` builds a local Retraction Watch index from the official daily-updated dump — `--retraction-cache` then verifies offline with notice granularity |
 | Wayback archive links | attached to dead links automatically |
 | Completeness scoring | how many export fields the registry CSL can back-fill |
 | Speed | 20-ref mixed list ≈18s at `--workers 4` (default), ≈7s cache-warm, ≈47s serial — measured table: `references/verification-details.md` |

@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "4.2.0"
+VERSION = "4.3.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -834,6 +834,23 @@ def _urlopen_retry(req, timeout: float, attempts: int = 3, backoff: float = 1.5)
     raise last_exc
 
 
+def _title_sim(a: str, b: str) -> float:
+    """题名比对双通道取 max：序列相似度（SequenceMatcher）+ 词集 Jaccard。
+    后者对「登记版题名词序重排」鲁棒——ACR/EULAR 分类标准登记题名把年份
+    提前（"2013 classification criteria...: an American College..."），
+    声称题名（参考文献写法）与登记题名词序不同，纯序列比对给 <0.5 误判
+    （实测 2026-10-14，PMID 24122180）。v4.3.0 起为模块级（OpenAlex 找锚
+    通道复用同一比对口径，避免两套相似度漂移）。"""
+    a_n, b_n = _cjk_norm(a).lower(), _cjk_norm(b).lower()
+    seq = difflib.SequenceMatcher(None, a_n, b_n).ratio()
+    # 词集用原始题名（保留空格）切词——_cjk_norm 输出是无空格连续串，
+    # 在其上 findall 只会得到一个超长 token，Jaccard 退化为包含度（实测踩坑）
+    ta = set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", str(a).lower()))
+    tb = set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", str(b).lower()))
+    jac = (len(ta & tb) / len(ta | tb)) if (ta or tb) else 0.0
+    return max(seq, jac)
+
+
 def pubmed_title_reverse_lookup(title: str, source: str, year,
                                 timeout: float) -> tuple:
     """v4.0.0 Vancouver 医学引用的 PubMed 题名反查（无标识符引用的官方核验通道）。
@@ -935,21 +952,6 @@ def pubmed_title_reverse_lookup(title: str, source: str, year,
         _cb_record(u2, True)
         return "", ("PubMed 反查未完成（网络传输失败，已重试）——非查无；"
                     "网络恢复后复跑可完成核验"), False, "", True
-    def _title_sim(a: str, b: str) -> float:
-        """题名比对双通道取 max：序列相似度（SequenceMatcher）+ 词集 Jaccard。
-        后者对「登记版题名词序重排」鲁棒——ACR/EULAR 分类标准登记题名把年份
-        提前（"2013 classification criteria...: an American College..."），
-        声称题名（参考文献写法）与登记题名词序不同，纯序列比对给 <0.5 误判
-        （实测 2026-10-14，PMID 24122180）。"""
-        a_n, b_n = _cjk_norm(a).lower(), _cjk_norm(b).lower()
-        seq = difflib.SequenceMatcher(None, a_n, b_n).ratio()
-        # 词集用原始题名（保留空格）切词——_cjk_norm 输出是无空格连续串，
-        # 在其上 findall 只会得到一个超长 token，Jaccard 退化为包含度（实测踩坑）
-        ta = set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", str(a).lower()))
-        tb = set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", str(b).lower()))
-        jac = (len(ta & tb) / len(ta | tb)) if (ta or tb) else 0.0
-        return max(seq, jac)
-
     best = None  # (sim, pmid, meta_title, meta_source, meta_year)
     for pid in ids:
         doc = (j2.get("result") or {}).get(pid) or {}
@@ -987,8 +989,11 @@ def pubmed_title_reverse_lookup(title: str, source: str, year,
 
 
 # v4.2.0 中文医学期刊 → NLM TA（题名缩写）映射。数据源=NLM 目录静态快照（中华医学会
-# 系列命名规律 "Zhonghua X Za Zhi"）。收录错误的代价=锚定零命中静默放行（绝不误判），
-# 未收录期刊（如仅万方收录者）自然落入「查无转人工」的既有诚实路径。
+# 系列命名规律 "Zhonghua X Za Zhi"）。收录错误的代价=锚定零命中静默放行（绝不误判）。
+# v4.3.0 数据治理：2026-10-18 PubMed 在线抽验——21 条候选映射属「目录登记但 MEDLINE
+# 零收录」（定位器永哑火）已剔除，现存 17 条全部实测有收录（中华儿科杂志 6254 条等；2026-10-18 复验
+# 中华创伤杂志亦零收录同剔——「18 条全部实测」初版声明经二次抽验纠正为 17）；
+# 抽验工具=tools/check_ta_table.py。未收录期刊由 OpenAlex 通道（v4.3.0）覆盖。
 _CN_JOURNAL_TA = {
     "中华儿科杂志": "Zhonghua Er Ke Za Zhi",
     "中华医学杂志": "Zhonghua Yi Xue Za Zhi",
@@ -997,38 +1002,16 @@ _CN_JOURNAL_TA = {
     "中华内科杂志": "Zhonghua Nei Ke Za Zhi",
     "中华外科杂志": "Zhonghua Wai Ke Za Zhi",
     "中华妇产科杂志": "Zhonghua Fu Chan Ke Za Zhi",
-    "中华神经科杂志": "Zhonghua Shen Jing Ke Za Zhi",
     "中华放射学杂志": "Zhonghua Fang She Xue Za Zhi",
     "中华血液学杂志": "Zhonghua Xue Ye Xue Za Zhi",
-    "中华内分泌代谢杂志": "Zhonghua Nei Fen Mi Dai Xie Za Zhi",
-    "中华糖尿病杂志": "Zhonghua Tang Niao Bing Za Zhi",
-    "中华肾脏病杂志": "Zhonghua Shen Zang Bing Za Zhi",
-    "中华消化杂志": "Zhonghua Xiao Hua Za Zhi",
-    "中华肝胆外科杂志": "Zhonghua Gan Dan Wai Ke Za Zhi",
-    "中华普通外科杂志": "Zhonghua Pu Tong Wai Ke Za Zhi",
-    "中华骨科杂志": "Zhonghua Gu Ke Za Zhi",
-    "中华急诊医学杂志": "Zhonghua Ji Zhen Yi Xue Za Zhi",
-    "中华麻醉学杂志": "Zhonghua Ma Zui Xue Za Zhi",
     "中华护理杂志": "Zhonghua Hu Li Za Zhi",
-    "中华医院管理杂志": "Zhonghua Yi Yuan Guan Li Za Zhi",
     "中华预防医学杂志": "Zhonghua Yu Fang Yi Xue Za Zhi",
     "中华流行病学杂志": "Zhonghua Liu Xing Bing Xue Za Zhi",
-    "中华实验外科杂志": "Zhonghua Shi Yan Wai Ke Za Zhi",
-    "中华创伤杂志": "Zhonghua Chuang Shang Za Zhi",
     "中华肿瘤杂志": "Zhonghua Zhong Liu Za Zhi",
     "中华耳鼻咽喉头颈外科杂志": "Zhonghua Er Bi Yan Hou Tou Jing Wai Ke Za Zhi",
     "中华眼科杂志": "Zhonghua Yan Ke Za Zhi",
     "中华口腔医学杂志": "Zhonghua Kou Qiang Yi Xue Za Zhi",
-    "中华皮肤科杂志": "Zhonghua Pi Fu Ke Za Zhi",
-    "中华老年医学杂志": "Zhonghua Lao Nian Yi Xue Za Zhi",
-    "中华全科医师杂志": "Zhonghua Quan Ke Yi Shi Za Zhi",
-    "中华围产医学杂志": "Zhonghua Wei Chan Yi Xue Za Zhi",
-    "中华检验医学杂志": "Zhonghua Jian Yan Yi Xue Za Zhi",
     "中华病理学杂志": "Zhonghua Bing Li Xue Za Zhi",
-    "中华高血压杂志": "Zhonghua Gao Xue Ya Za Zhi",
-    "中华炎性肠病杂志": "Zhonghua Yan Xing Chang Bing Za Zhi",
-    "中华新生儿科杂志": "Zhonghua Xin Sheng Er Ke Za Zhi",
-    "中华实用儿科临床杂志": "Zhonghua Shi Yong Er Ke Lin Chuang Za Zhi",
 }
 
 
@@ -1289,6 +1272,14 @@ def _journal_consistent(claimed: str, registry: str) -> bool:
     return bool(ok and hit >= max(1, len([w for w in short if w not in stop])))
 
 
+def _pmid_reg_doi(item: dict) -> str:
+    """v4.3.0 从 esummary item 提取登记 DOI（articleids），供桥接拯救复用。"""
+    for a in item.get("articleids") or []:
+        if (a.get("idtype") or "") == "doi":
+            return a.get("value") or ""
+    return ""
+
+
 def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float) -> tuple:
     """v3.4 池开发:PMID 元数据核验——堵「真 PMID+假标题/假期刊」拼接洞。
     此前 PMID-only 引用仅查存在性(pubmed_pmid_exists),esummary 拉回的
@@ -1338,11 +1329,7 @@ def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float
             # =登记 DOI（articleids），桥接命中给一致，否则 partial 转人工。
             _sf_c, _sf_r = _script_family(str(title)), _script_family(mt)
             if _sf_c != "none" and _sf_r != "none" and _sf_c != _sf_r:
-                reg_doi = ""
-                for a in item.get("articleids") or []:
-                    if (a.get("idtype") or "") == "doi":
-                        reg_doi = a.get("value") or ""
-                        break
+                reg_doi = _pmid_reg_doi(item)
                 bridge = (_cross_lingual_bridge(reg_doi, str(title),
                                                 {"title": mt}, timeout)
                           if reg_doi and DOI_RE.match(reg_doi) else "")
@@ -1351,6 +1338,16 @@ def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float
                                 f"登记题名《{mt[:60]}》）"), True
                 return "partial", (f"跨语言标题无法机器比对（声称 {_sf_c} 文 vs 登记 "
                                    f"{_sf_r} 文,相似度 {sim:.2f}）→ 建议人工核对"), False
+            # v4.3.0 判死前桥接拯救（audit P2：罗马化/翻译题名形态——声称与登记
+            # 同属拉丁族但一个是拼音/译名时 sim 天然低）；桥接原料=登记 DOI。
+            # 桥接未命中仍判死——同语言假标题的拼接防护不弱化。
+            reg_doi = _pmid_reg_doi(item)
+            if reg_doi and DOI_RE.match(reg_doi):
+                bridge = _cross_lingual_bridge(reg_doi, str(title),
+                                               {"title": mt}, timeout)
+                if bridge:
+                    return "", (f"PMID 元数据核验一致（跨语言桥接：{bridge}；"
+                                f"登记题名《{mt[:60]}》）"), True
             return "invalid", (f"PMID 登记标题相似度仅 {sim:.2f}（登记为《{mt[:60]}》）"
                                "→ 真 PMID 假标题，疑似拼接伪造"), False
         if sim < 0.82:
@@ -1788,23 +1785,29 @@ def crossref_retraction_check(doi: str, timeout: float) -> dict:
         return dict(failed)
 
 
-def openalex_title_check(title: str, timeout: float) -> str:
-    """v1.8 OpenAlex 书目级存在性核查（无 DOI/PMID/arXiv 引用的补充信号源）。
-    只提供正面确认与近似提示，绝不下 invalid 判定——OpenAlex 收录有滞后，
-    「查无」不等于「编造」（GESIS 失效模式 #3：库覆盖有限）。异常静默跳过。
-    v1.9：支持 API key（2026-02 起 OpenAlex 生产调用需 key，--openalex-key /
-    环境变量注入）；403 给可操作提示而非静默跳过。"""
+def openalex_works_lookup(title: str, year, timeout: float) -> tuple:
+    """v4.3.0 OpenAlex 书目检索升级版：确认存在性 + 候选 DOI 锚。
+
+    背景（TA 表在线甄别实锤）：39 条候选中文医学期刊映射仅 18 条有 PubMed 收录——
+    非 MEDLINE 期刊（中华神经科杂志等 21 条）与万方系期刊的引用此前无任何官方
+    核验通路。本函数把 v1.8 的「只确认」升级为「找锚→验锚」链的前半程：
+    OpenAlex 检索命中（_title_sim ≥0.82 且年份相容）即提取该记录的 DOI，
+    交给 DOI.org 权威核验（verify_one 接线）——OpenAlex 只当索引用，
+    判定证据全部来自注册库，聚合库质量参差不影响判定权威性。
+    无 DOI 候选或相似度不足时维持 v1.8 语义（确认→partial；查无永不判死）。
+
+    返回 (note, confirmed, doi_candidate)。"""
     if len((title or "").strip()) < 18:
-        return ""
+        return "", False, ""
     q = quote(title.strip(), safe="")
-    url = (f"https://api.openalex.org/works?search={q}&per-page=1"
-           "&select=display_name,publication_year")
+    url = (f"https://api.openalex.org/works?search={q}&per-page=3"
+           "&select=display_name,publication_year,doi")
     key = _OPTS.get("openalex_key") or ""
     if key:
         url += f"&api_key={quote(key, safe='')}"
     try:
         if _cb_open(url):
-            return ""
+            return "", False, ""
         req = urllib.request.Request(
             url, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
         with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -1812,35 +1815,58 @@ def openalex_title_check(title: str, timeout: float) -> str:
             results = (json.loads(resp.read().decode("utf-8", "ignore"))
                        or {}).get("results") or []
         if not results:
-            return "OpenAlex 未检索到明显匹配条目（可能未被收录，不作为编造依据）"
-        w = results[0]
+            return "OpenAlex 未检索到明显匹配条目（可能未被收录，不作为编造依据）", False, ""
+        try:
+            year_i = int(str(year)) if year else None
+        except (TypeError, ValueError):
+            year_i = None
+        best = None  # (sim, w)
+        for w in results:
+            mt = re.sub(r"\s+", " ", str(w.get("display_name") or "")).strip()
+            if not mt:
+                continue
+            sim = _title_sim(title, mt)
+            my = w.get("publication_year")
+            year_ok = (not year_i) or (not my) or abs(year_i - int(my)) <= 1
+            if year_ok and (best is None or sim > best[0]):
+                best = (sim, w)
+        if best is None:
+            return ("OpenAlex 未检索到明显匹配条目（可能未被收录，不作为编造依据）",
+                    False, "")
+        sim, w = best
         mt = re.sub(r"\s+", " ", str(w.get("display_name") or "")).strip()
         my = w.get("publication_year")
         year_note = f"（{my}）" if my else ""
-        t = title.strip().lower()
-        mt_l = mt.lower()
-        sim = difflib.SequenceMatcher(None, t, mt_l).ratio()
-        pfx = difflib.SequenceMatcher(None, t, mt_l[:len(t)]).ratio() if len(mt_l) >= len(t) else 0.0
-        best = max(sim, pfx)
-        if best >= 0.82:
-            return f"OpenAlex 书目确认存在：{mt[:60]}{year_note}"
-        if best >= 0.60:
-            return (f"OpenAlex 近似条目（标题相似度 {best:.2f}）：{mt[:60]}{year_note}，"
-                    "建议人工复核")
-        return (f"OpenAlex 未检索到明显匹配（最高相似度 {best:.2f}）；"
-                "可能未被收录或较新，不作为编造依据")
+        doi_c = str(w.get("doi") or "").replace("https://doi.org/", "").strip()
+        if sim >= 0.82:
+            return (f"OpenAlex 书目确认存在：{mt[:60]}{year_note}", True, doi_c)
+        if sim >= 0.60:
+            return (f"OpenAlex 近似条目（标题相似度 {sim:.2f}）：{mt[:60]}{year_note}，"
+                    "建议人工复核", False, "")
+        return (f"OpenAlex 未检索到明显匹配（最高相似度 {sim:.2f}）；"
+                "可能未被收录或较新，不作为编造依据", False, "")
     except urllib.error.HTTPError as e:
         _cb_record(url, True, degrade=False)  # 站点有响应：不计入全局网络降级
         if e.code == 403:
             return ("OpenAlex 拒绝访问（403）——2026 年起生产调用需 API key（无 key 每日仅 "
-                    "100 credits 测试额度），可用 --openalex-key 或环境变量 OPENALEX_API_KEY 配置后重试")
+                    "100 credits 测试额度），可用 --openalex-key 或环境变量 OPENALEX_API_KEY 配置后重试",
+                    False, "")
         if e.code == 429:
-            return ("OpenAlex 限流（429，常见于无 key 每日额度用尽）——可用 --openalex-key "
-                    "或环境变量 OPENALEX_API_KEY 配置免费 key 后重试")
-        return ""
+            return ("OpenAlex 限流（429）——生产调用建议 --openalex-key 或环境变量 "
+                    "OPENALEX_API_KEY，稍后自动重试即可", False, "")
+        return "", False, ""
     except Exception:
         _cb_record(url, True)
-        return ""
+        return "", False, ""
+
+
+def openalex_title_check(title: str, timeout: float) -> str:
+    """v1.8 OpenAlex 书目级存在性核查（v4.3.0 起为 openalex_works_lookup 的
+    兼容薄包装——丢弃 DOI 候选只返回注记，消除双实现漂移：同一题名两条路径
+    必须给同一 confirmed 判定）。"""
+    note, _confirmed, _doi = openalex_works_lookup(title, None, timeout)
+    return note
+
 
 
 def s2_citation_contexts(doi: str, timeout: float, max_samples: int = 3) -> dict:
@@ -2324,16 +2350,66 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
                            note=(out["note"] + "；" if out["note"] else "") +
                                 "无标识符引用经 PubMed 卷期页锚定核验一致，已回填 PMID 锚")
                 return out
-            oa_note = openalex_title_check(t_claim, timeout)
-            out["checks"]["openalex"] = {"ran": True,
-                                         "confirmed": "确认存在" in oa_note}
+            oa_note, oa_confirmed, oa_doi = openalex_works_lookup(t_claim, ref.get("year"), timeout)
+            out["checks"]["openalex"] = {"ran": True, "confirmed": oa_confirmed,
+                                         "doi_candidate": oa_doi or None}
             s2_matched, s2_note = s2_title_confirm(t_claim, timeout)
             out["checks"]["s2_title"] = {"matched": s2_matched}
             if oa_note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + oa_note
             if s2_note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + s2_note
-            if "确认存在" in oa_note:
+            # v4.3.0 找锚→验锚链：OpenAlex 确认且带候选 DOI → DOI.org 权威核验。
+            # OpenAlex 只当索引（聚合库记录质量参差，v1.8 既有结论），判定证据
+            # 全部来自注册库；标题不符按 DOI 通路语义判（错引不因「存在相似条目」
+            # 放行）；撤稿检测照走，锚定通路不绕开安全检查。
+            if oa_confirmed and oa_doi and not offline and DOI_RE.match(oa_doi):
+                doi_adj2, note2, doi_m2, csl2 = doi_metadata_match(
+                    oa_doi, clean_title(str(ref.get("title") or "")),
+                    ref.get("year"), timeout,
+                    str(ref.get("source") or ""),
+                    str(ref.get("authors") or ""))
+                out["checks"]["doi_metadata"] = {
+                    "matched": doi_m2, "adjust": doi_adj2, "via": "openalex-anchor"}
+                if csl2:
+                    out["checks"]["doi_metadata"]["csl"] = csl2
+                if note2:
+                    out["note"] = (out["note"] + "；" if out["note"] else "") + note2
+                ret2 = crossref_retraction_check(oa_doi, timeout)
+                retracted = bool(ret2.get("retracted"))
+                out["checks"]["retraction"] = ret2
+                if ret2.get("nature"):
+                    out["note"] = (out["note"] + "；" if out["note"] else "") + \
+                        _retraction_nature_note(
+                            ret2["nature"], ret2["when"], ret2["notice_doi"],
+                            "本地 Retraction Watch 索引" if ret2.get("source") == "local"
+                            else "Crossref/Retraction Watch")
+                elif ret2.get("check_failed"):
+                    out["note"] = (out["note"] + "；" if out["note"] else "") + \
+                        "撤稿检查未完成（网络传输失败，重试后仍不通）——非「未撤稿」"
+                if doi_adj2 == "invalid":
+                    out.update(verdict="invalid", needs_human_check=True)
+                    return out
+                if doi_adj2 == "":
+                    if not doi_m2:
+                        # 审计 P0 修复：元数据获取失败/断路器跳过的 adjust="" 不等于
+                        # 「核验一致」——CN 网络 doi.org 常态不通，此场景旧逻辑会把
+                        # 失败当一致升 verified。诚实封顶 partial 转人工
+                        out.update(verdict="partial", needs_human_check=True)
+                        return out
+                    if retracted or ret2.get("nature") == "expression_of_concern":
+                        out.update(verdict="partial", needs_human_check=True)
+                    else:
+                        if not out.get("doi"):
+                            out["doi"] = oa_doi
+                        out.update(verdict="verified", needs_human_check=False,
+                                   note=(out["note"] + "；" if out["note"] else "") +
+                                        "无标识符引用经 OpenAlex 找锚、DOI.org 权威核验一致，已回填 DOI 锚")
+                    return out
+                # doi_adj2 == "partial"（跨语言桥接未命中/相似度居中）→ 封顶 partial
+                out.update(verdict="partial", needs_human_check=True)
+                return out
+            if oa_confirmed:
                 out.update(verdict="partial", needs_human_check=True)
                 return out
             out.update(verdict="unverified", needs_human_check=True,

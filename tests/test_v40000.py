@@ -155,8 +155,8 @@ class TestWiringAndVersion(unittest.TestCase):
         self.assertIn('path.lower().endswith((".md", ".markdown"))', src)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "4.2.0")
-        self.assertIn("version: 4.2.0",
+        self.assertEqual(vr.VERSION, "4.3.0")
+        self.assertIn("version: 4.3.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
     def test_version_scheme_rule(self):

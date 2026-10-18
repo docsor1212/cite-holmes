@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "4.3.0"
+VERSION = "4.4.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -2193,6 +2193,10 @@ def load_refs_file(path: str) -> list:
         raise
 
 
+_REF_SECTION_RE = re.compile(
+    r"(?:^|\n)#{0,6}\s*(?:\d+[.、]?\s*)?(?:参考文献|References)[^\n]*\n")
+
+
 def parse_markdown_refs(text: str) -> list:
     """v4.0.0 从 markdown「参考文献」节提取 Vancouver 编号条目（医学文档主流形态：
     `1. **作者, et al.** 题名. *期刊*. 年;卷(期):页.`——无 DOI/PMID/URL）。
@@ -2207,7 +2211,7 @@ def parse_markdown_refs(text: str) -> list:
     - 卷(期):页提取 → volume/issue/pages（卷期页锚定通道原料）；
     - `[J]`/`[EB/OL]` 类型标记剥除；期刊段内「年, 卷(期): 页」残尾清理。"""
     refs = []
-    m = re.search(r"(?:^|\n)#{0,3}\s*(?:\d+[.、]?\s*)?(?:参考文献|References)[^\n]*\n", text)
+    m = _REF_SECTION_RE.search(text)
     body = text[m.end():] if m else text
     for raw in body.splitlines():
         line = re.sub(r"\*\*|\*|__|_", "", raw.strip())
@@ -3624,11 +3628,22 @@ def bind_citation(cit: dict, results: list) -> dict:
 
 
 def check_document(text: str, results: list, anchor_threshold: float = 0.34) -> dict:
-    """文档级上下文核验:抽取→绑定→锚词匹配。语义层(句子是否真被支撑)仍归 agent。"""
+    """文档级上下文核验:抽取→绑定→锚词匹配。语义层(句子是否真被支撑)仍归 agent。
+    v4.4.0：正文提取截断到「参考文献」节之前——节内 [N] 是清单编号不是引用标记，
+    不截断会把每条文献「自引」成已引用，孤儿审计与引用数全部失真（真网实战
+    首跑实锤：69 处"引用"含 16 个清单标签、覆盖度假 100%）。"""
+    _m = _REF_SECTION_RE.search(text)
+    if _m:
+        text = text[:_m.start()]
     cits = extract_citations(text)
     out = []
+    cited_all = set()  # 复合标记（[1-3]/[1,3]）的全部绑定条目——审计 P1：
+    # 原实现每标记只记首绑，医学高频的 [2-5] 会让条目 2-4 被误报孤儿
     for c in cits:
         b = bind_citation(c, results)
+        for r in (b["bound"] or []):
+            if r is not None and r.get("index") is not None:
+                cited_all.add(r["index"])
         for r in (b["bound"] or [None])[:1]:
             ar = anchor_rate(c["sentence"], r) if r else 0.0
             entry = {"marker": c["marker"], "sentence": c["sentence"][:300],
@@ -3643,11 +3658,24 @@ def check_document(text: str, results: list, anchor_threshold: float = 0.34) -> 
             out.append(entry)
     unbound = [e for e in out if not e["bound"]]
     low = [e for e in out if e["bound"] and e["anchor"] == "low"]
+    # v4.4.0 引用完整性审计：孤儿文献（清单里列了、正文从未引用）与覆盖率。
+    # 实锤：毛细支气管炎报告 16 条中 5 条（31%）从未被正文引用——列了没引是学术
+    # 写作规范问题（漏引或冗列），不是编造——advisory 级，绝不改判定。
+    cited_idx = {e["ref_index"] for e in out if e.get("ref_index") is not None}
+    cited_idx |= cited_all
+    listed_idx = sorted({r.get("index") for r in results
+                         if r.get("index") is not None})
+    uncited = sorted(i for i in listed_idx if i not in cited_idx)
+    coverage = (round(len([i for i in listed_idx if i in cited_idx])
+                      / len(listed_idx), 2) if listed_idx else 0.0)
     return {"citations": out, "n_citations": len(out),
             "n_unbound": len(unbound), "n_low_anchor": len(low),
             "anchor_threshold": anchor_threshold,
+            "n_listed": len(listed_idx), "n_uncited": len(uncited),
+            "uncited_refs": uncited, "coverage": coverage,
             "note": ("锚词率=引文句与被引标题的内容词重叠(阈值 %.2f);low≠错引,"
-                     "是语义层人工复核候选" % anchor_threshold)}
+                     "是语义层人工复核候选;未引用条目=写作规范建议(漏引或冗列),"
+                     "非真伪问题" % anchor_threshold)}
 
 
 # ═══ v3.9.0 结构化错误码(errorHandling):五态之上的机器可读细分 ═══
@@ -4028,6 +4056,14 @@ def render_md(results: list, offline: bool, profile: str = "general",
                   f"- 正文引用 {context_check['n_citations']} 处：未绑定 "
                   f"{context_check['n_unbound']}，锚词不足 {context_check['n_low_anchor']}"
                   f"（阈值 {context_check['anchor_threshold']}）"]
+        if context_check.get("n_listed"):
+            _u = context_check.get("uncited_refs") or []
+            _us = (f"（条目 {'、'.join(str(i) for i in _u[:10])}"
+                   f"{'…' if len(_u) > 10 else ''}）" if _u else "")
+            lines.append(
+                f"- 引用覆盖 {context_check['coverage']:.0%}：清单 "
+                f"{context_check['n_listed']} 条中 {context_check['n_uncited']} 条"
+                f"未在正文引用{_us}——漏引或冗列建议（写作规范提示，非真伪判定）")
         for c in context_check["citations"]:
             if not c["bound"]:
                 lines.append(f"- ⚠️ {c['marker']} 未绑定——正文引用了清单外的编号/条目")
@@ -4522,7 +4558,8 @@ def main() -> int:
     ap.add_argument("--timeout", type=float, default=10.0, help="单 URL 超时秒数（默认 10）")
     ap.add_argument("--interval", type=float, default=1.0, help="请求间隔秒数（默认 1.0）")
     ap.add_argument("--check-document", default="",
-                    help="v3.7.0 文档级上下文核验:给定正文 markdown/text,解析 in-text "
+                    help="v4.4.0 单文件模式:仅给文档路径(含参考文献节)即一体化核验;"
+                         "或配合 --refs 做文档级上下文核验:解析 in-text "
                          "引用标记([12]/[1-4]/(Author, Year)/doi.org 链接),绑定 --refs "
                          "核验结果并做锚词匹配(需与 --refs 同用)")
     ap.add_argument("--anchor-threshold", type=float, default=0.34,
@@ -4681,12 +4718,28 @@ def main() -> int:
         "judge_model": args.judge_model.strip(),
     })
 
-    if not args.refs and not args.claims:
-        ap.error("需要 --refs 或 --claims 之一")
+    refs = None
+    if (getattr(args, "check_document", "") and not args.refs
+            and not args.claims):
+        # v4.4.0 单文件一体化：--check-document 独用=从文档自身「参考文献」
+        # 节提取清单再全量核验——dogfood 实录同一文件传两遍是最大使用摩擦
+        try:
+            _doctext = open(args.check_document, encoding="utf-8",
+                            errors="replace").read()
+        except (OSError, ValueError) as e:
+            print(f"❌ 读取文档失败：{e}", file=sys.stderr)
+            return 2
+        refs = parse_markdown_refs(_doctext)
+        if refs:
+            print(f"[one-file] 自文档参考文献节提取 {len(refs)} 条（GB/T/Vancouver）")
+    if not args.refs and not args.claims and not refs:
+        print("❌ 需要 --refs 或 --claims 之一；或 --check-document 指向含"
+              "「参考文献」节的文档（v4.4.0 单文件模式）", file=sys.stderr)
+        return 2
     try:
         if args.claims:
             refs = json.loads(args.claims)
-        else:
+        elif args.refs:
             refs = load_refs_file(args.refs)  # v1.9：JSON 或 BibTeX 自动识别
     except (OSError, json.JSONDecodeError, ValueError) as e:
         print(f"❌ 读取引用清单失败：{e}", file=sys.stderr)
@@ -4847,7 +4900,8 @@ def main() -> int:
     scorecard = compute_scorecard(results)
     cd = None
     if getattr(args, "check_document", ""):
-        cd = check_document(open(args.check_document, encoding="utf-8").read(),
+        cd = check_document(open(args.check_document, encoding="utf-8",
+                                 errors="replace").read(),
                             results, float(args.anchor_threshold))
     content = (render_html(results, args.offline, args.profile, context_check=cd)
                if args.format == "html"
@@ -4869,6 +4923,11 @@ def main() -> int:
         print(f"\n== 上下文核验({args.check_document}) ==")
         print(f"  in-text 引用 {cd['n_citations']} 处:未绑定 {cd['n_unbound']},"
               f"锚词不足 {cd['n_low_anchor']}(阈值 {cd['anchor_threshold']})")
+        if cd.get("n_listed"):
+            print(f"  引用覆盖 {cd['coverage']:.0%}:清单 {cd['n_listed']} 条中 "
+                  f"{cd['n_uncited']} 条未在正文引用"
+                  f"{(':' + '、'.join(str(i) for i in (cd.get('uncited_refs') or [])[:10]) + ('…' if len(cd.get('uncited_refs') or []) > 10 else '')) if cd.get('uncited_refs') else ''}"
+                  "（漏引或冗列建议，非真伪判定）")
         for c in cd["citations"][:12]:
             flag = ("未绑定" if not c["bound"] else
                     f"锚词率 {c['anchor_rate']}{'⚠' if c['anchor'] == 'low' else ''}")

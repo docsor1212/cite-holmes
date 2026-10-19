@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "4.4.0"
+VERSION = "4.5.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -1019,6 +1019,119 @@ def _ta_for_journal(source: str) -> str:
     """中文刊名 → NLM TA；否则原样返回（英文引用的著录缩写通常即 TA）。"""
     s = re.sub(r"[\s《》*]+", "", str(source or ""))
     return _CN_JOURNAL_TA.get(s) or str(source or "").strip()
+
+
+def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0) -> tuple:
+    """v4.5.0 文献发现：主题 → PubMed + OpenAlex 双源检索 → 候选清单。
+
+    把 skill 从「验已有的文献」扩展为「找文献且出生即核验」——检索结果天然
+    带官方标识符（PMID/DOI），交回主管道后走全部既有核验栈（含撤稿检测），
+    输出一份每条都验过的文献清单（GB/T/BibTeX 一键导出）。
+    返回 (refs, notes)：单源失败静默跳过（绝不因单源失败崩批）；
+    跨源按 doi/pmid/题名规一化去重。"""
+    refs, notes = [], []
+    seen = set()
+
+    def _key(doi, pmid, title):
+        return (f"doi:{doi.lower()}" if doi else
+                f"pmid:{pmid}" if pmid else
+                "t:" + re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", (title or "").lower())[:60])
+
+    def _add(doi, pmid, title, source, year):
+        doi = (doi or "").replace("https://doi.org/", "").strip()
+        pmid = str(pmid or "").strip()
+        title = re.sub(r"\s+", " ", str(title or "")).strip()
+        if not title or len(title) < 15:
+            return
+        k = _key(doi, pmid, title)
+        if k in seen or k == "t:":
+            return
+        seen.add(k)
+        ref = {"title": title, "source": str(source or ""), "year": year}
+        if doi and DOI_RE.match(doi):
+            ref["doi"] = doi
+        if pmid and PMID_RE.match(pmid):
+            ref["pmid"] = pmid
+        refs.append(ref)
+
+    limit = max(1, min(int(limit or 10), 25))
+    # 源一：PubMed 主题检索（官方题录，PMID 天然在握）
+    try:
+        u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
+             + _ncbi_qs(f"?db=pubmed&retmode=json&retmax={limit}&sort=relevance"
+                        f"&term={quote(topic)}"))
+        if not _cb_open(u):
+            _ncbi_rate_wait()
+            req = urllib.request.Request(
+                u, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
+            with _urlopen_retry(req, timeout) as resp:
+                j = json.loads(resp.read().decode("utf-8", "ignore"))
+            _cb_record(u, False)
+            ids = [str(x) for x in ((j.get("esearchresult") or {}).get("idlist") or [])]
+            if ids:
+                u2 = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
+                      + _ncbi_qs(f"?db=pubmed&retmode=json&id={','.join(ids)}"))
+                _ncbi_rate_wait()
+                req2 = urllib.request.Request(
+                    u2, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
+                try:
+                    with _urlopen_retry(req2, timeout) as resp2:
+                        j2 = json.loads(resp2.read().decode("utf-8", "ignore"))
+                    _cb_record(u2, False)
+                except Exception:
+                    _cb_record(u2, True)  # 审计 P2：题录拉取失败也要进断路器记账
+                    j2 = {}
+                res = j2.get("result") or {}
+                for pid in ids:
+                    doc = res.get(pid) or {}
+                    my = re.search(r"(19|20)\d{2}", str(doc.get("pubdate") or ""))
+                    _add(_pmid_reg_doi(doc), pid, doc.get("title"),
+                         doc.get("source") or "",
+                         int(my.group(0)) if my else None)
+            else:
+                notes.append("PubMed 该主题零命中")
+        else:
+            notes.append("PubMed 断路器跳过")
+    except urllib.error.HTTPError as e:
+        _cb_record(u, False, degrade=False)  # 审计 P2：服务器应答不熔断，但必须记账
+        notes.append(f"PubMed HTTP {e.code}——本源跳过"
+                     + ("（限流，建议 NCBI_API_KEY）" if e.code in (429, 403) else ""))
+    except Exception:
+        _cb_record(u, True)  # 审计 P2：传输失败必须进断路器/全局降级
+        notes.append("PubMed 检索失败——本源跳过")
+    # 源二：OpenAlex 主题检索（覆盖面更广，DOI 候选交回核验）
+    ou = None
+    try:
+        q = quote(topic, safe="")
+        ou = (f"https://api.openalex.org/works?search={q}&per-page={limit}"
+              "&select=display_name,publication_year,doi,primary_location")
+        okey = _OPTS.get("openalex_key") or ""
+        if okey:
+            ou += f"&api_key={quote(okey, safe='')}"
+        if not _cb_open(ou):
+            oreq = urllib.request.Request(
+                ou, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
+            with _urlopen_retry(oreq, timeout) as oresp:
+                oj = json.loads(oresp.read().decode("utf-8", "ignore"))
+            _cb_record(ou, False)
+            for w in (oj.get("results") or []):
+                _add(w.get("doi"), None, w.get("display_name"),
+                     ((w.get("primary_location") or {}).get("source") or {}).get("display_name")
+                     if isinstance(w.get("primary_location"), dict) else "",
+                     w.get("publication_year"))
+        else:
+            notes.append("OpenAlex 断路器跳过")
+    except urllib.error.HTTPError as e:
+        if ou:
+            _cb_record(ou, False, degrade=False)  # 服务器应答不熔断（自家惯例）
+        notes.append(f"OpenAlex HTTP {e.code}——本源跳过"
+                     + ("（2026 年起生产调用需 --openalex-key）" if e.code == 403
+                        else "（限流）" if e.code == 429 else ""))
+    except Exception:
+        if ou:
+            _cb_record(ou, True)
+        notes.append("OpenAlex 检索失败——本源跳过")
+    return refs, notes
 
 
 def pubmed_locator_lookup(source: str, year, volume, issue, pages,
@@ -4550,6 +4663,12 @@ def run_doctor(net: bool = False, timeout: float = 6.0,
 def main() -> int:
     ap = argparse.ArgumentParser(description="deep-research 引用机械验证器（五态判定）")
     ap.add_argument("--refs", help="引用清单路径：JSON 数组（research_refs.json）或 BibTeX（refs.bib，v1.9）")
+    ap.add_argument("--discover", help='v4.5.0 文献发现：主题检索双源（PubMed+OpenAlex）找文献，'
+                                       '结果带官方标识符交全栈核验——出生即核验（如 --discover "bronchiolitis diagnosis"）')
+    ap.add_argument("--discover-limit", type=int, default=10,
+                    help="文献发现每源条数上限（默认 10，封顶 25）")
+    ap.add_argument("--demo", action="store_true",
+                    help="v4.5.0 零门槛体验：用内置样例清单（8 条含 3 处预埋伪造）跑完整判定流程")
     ap.add_argument("--claims", help="内联 JSON 引用数组（同 --refs 的 schema）")
     ap.add_argument("--out", default="verify_report.md", help="Markdown 报告输出路径")
     ap.add_argument("--json-out", help="JSON 报告输出路径（默认 <out>.json）")
@@ -4719,10 +4838,32 @@ def main() -> int:
     })
 
     refs = None
-    if (getattr(args, "check_document", "") and not args.refs
+    if getattr(args, "demo", False) and not args.refs and not args.claims:
+        _demo = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                             "..", "examples", "demo_refs.json")
+        with open(_demo, encoding="utf-8") as f:
+            refs = json.load(f)
+        print(f"[demo] 内置样例清单 {len(refs)} 条（含 3 处预埋伪造）——体验五态判定全流程")
+    if (getattr(args, "discover", "") and not args.refs
+            and not args.claims and not refs):
+        if args.offline:
+            print("❌ 文献发现需要联网检索——--offline 模式不适用", file=sys.stderr)
+            return 2
+        _drefs, _dnotes = discover_refs(args.discover, args.discover_limit,
+                                        args.timeout)
+        for _n in _dnotes:
+            print(f"[discover] {_n}")
+        if _drefs:
+            refs = _drefs
+            print(f"[discover] 双源命中 {len(refs)} 条（去重后）——进入核验栈，出生即核验")
+        else:
+            print("❌ 文献发现双源零命中——请换检索词或检查网络", file=sys.stderr)
+            return 2
+    if (getattr(args, "check_document", "") and not refs and not args.refs
             and not args.claims):
         # v4.4.0 单文件一体化：--check-document 独用=从文档自身「参考文献」
         # 节提取清单再全量核验——dogfood 实录同一文件传两遍是最大使用摩擦
+        # （审计 P2：not refs 守卫——否则无条件覆盖 demo/discover 已装载清单）
         try:
             _doctext = open(args.check_document, encoding="utf-8",
                             errors="replace").read()
@@ -4733,8 +4874,9 @@ def main() -> int:
         if refs:
             print(f"[one-file] 自文档参考文献节提取 {len(refs)} 条（GB/T/Vancouver）")
     if not args.refs and not args.claims and not refs:
-        print("❌ 需要 --refs 或 --claims 之一；或 --check-document 指向含"
-              "「参考文献」节的文档（v4.4.0 单文件模式）", file=sys.stderr)
+        print("❌ 需要 --refs 或 --claims 之一；--check-document 指向含「参考文献」节"
+              "的文档（v4.4.0 单文件模式）；--discover 主题检索（v4.5.0 文献发现）；"
+              "或 --demo 零门槛体验", file=sys.stderr)
         return 2
     try:
         if args.claims:

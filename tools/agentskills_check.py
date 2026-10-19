@@ -65,7 +65,10 @@ def main() -> int:
         # 折叠标量（>-）取正文块长度——遇下一 top-level 键即止(贪婪版会把
         # when_to_use 一并计入致误报超长,09-24 修复)
         m = re.search(r"description:\s*>-?\n((?:[ \t]+(?!\w+:).*\n?)+)", fm)
-        dlen = len(m.group(1)) if m else len(desc)
+        # v4.5.0：量折叠后的值（平台 YAML 折叠实收）——注意 desc 不能用作长度：
+        # scalar_value 对 >- 折叠标量返回 ">-"（审计 P1 实证 dlen 恒 2 守卫已死）
+        dlen = len(" ".join(l.strip() for l in m.group(1).splitlines())) if m \
+            else len(desc)
         if dlen > 1024:
             fails.append(f"description 超长（{dlen} > 1024，会被静默丢弃）")
         else:

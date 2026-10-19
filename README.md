@@ -222,6 +222,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v4.5.0** — literature discovery: `--discover "topic"` searches PubMed + OpenAlex and feeds every hit through the full verification stack - a born-verified reference list with GB/T 7714 / BibTeX export; `--demo` runs a bundled 8-reference sample (3 planted fakes) for a zero-setup tour of the verdict pipeline; description now carries literature-search reach terms.
+
 **v4.4.0** — reference-list completeness audit: `--check-document` reports orphan references (listed but never cited in the body) and coverage stats - a writing-integrity advisory that never changes verdicts; one-file mode runs extraction, verification and in-text cross-checking from a single document path; in-text citation extraction truncates at the reference section, fixing false citation counts from list numbering.
 
 **v4.3.0** — non-MEDLINE Chinese journals join the verification coverage: OpenAlex anchor search chains into DOI-registry verification (the aggregator is only an index; the verdict evidence comes entirely from the DOI registry, retraction checks included); `tools/build_retraction_cache.py` builds a local Retraction Watch index from the official daily dump for offline scale checks with notice granularity; the PMID path gains a pre-verdict bridge rescue for romanized/translated title claims; the Chinese journal TA table was live-audited and pruned to 17 verified mappings with a governance tool.

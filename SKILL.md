@@ -1,11 +1,11 @@
 ---
 name: cite-holmes
-version: 4.4.0
+version: 4.5.0
 author: DoctorQ Lab
 license: MIT
 description: >-
   Deep research that interrogates its own sources (Verified Deep Research):
-  calibrates scope first (3-5 sharp questions), then searches iteratively and
+  literature discovery (topic in, verified reference list out), then calibrates scope first (3-5 sharp questions), then searches iteratively and
   machine-verifies every citation. Also a standalone citation checker: paste
   any reference list and it runs full citation verification (it will verify
   citations before you cite) against official registries —
@@ -123,6 +123,7 @@ dual-reader header** + **CiteScore** (0-100 + A-D grade) + a one-line
 | Chinese scholarly registries | wanfangdata / CNKI / yiigle classified at journal tier |
 | Non-MEDLINE journals (identifier-less) | OpenAlex anchor search → DOI resolution: the aggregator is only an index, the verdict evidence comes entirely from the DOI registry (retraction checks still run on the anchored DOI) |
 | Retraction checks at scale | `tools/build_retraction_cache.py` builds a local Retraction Watch index from the official daily-updated dump — `--retraction-cache` then verifies offline with notice granularity |
+| Literature discovery | `--discover "topic"` searches PubMed + OpenAlex and verifies every hit at birth - a verified reference list out, GB/T 7714 / BibTeX export ready; `--demo` runs the bundled 8-reference sample (3 planted fakes) for a zero-setup tour |
 | Reference-list completeness | `--check-document` audits orphans (listed but never cited — a writing-integrity advisory, never a verdict) and coverage; one-file mode: pass the document alone and the reference section is auto-extracted |
 | Wayback archive links | attached to dead links automatically |
 | Completeness scoring | how many export fields the registry CSL can back-fill |

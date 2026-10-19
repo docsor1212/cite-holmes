@@ -9,8 +9,10 @@ import unittest
 import unittest.mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 sys.path.insert(0, os.path.join(HERE, "..", "mcp"))
+sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
+# v4.5.0 顺序修复：scripts 必须压在 mcp 之上——原顺序让本模块 import 到 mcp
+# 副本并污染 sys.modules，后续按名加载的测试（v40500）拿到无新特性的副本
 import verify_refs as vr  # noqa: E402
 
 SKILL = os.path.join(HERE, "..", "SKILL.md")
@@ -23,7 +25,7 @@ class TestV130(unittest.TestCase):
         vr._net_reset()
 
     def test_version_is_130(self):
-        self.assertEqual(vr.VERSION, "4.4.0")
+        self.assertEqual(vr.VERSION, "4.5.0")
 
     def test_en_description_contains_all_task_roots(self):
         s = open(SKILL, encoding="utf-8").read()
@@ -40,7 +42,9 @@ class TestV130(unittest.TestCase):
         s = open(SKILL, encoding="utf-8").read()
         fm = s.split("---")[1]
         m = re.search(r"description:\s*>-?\n((?:[ \t]+.*\n?)+)", fm)
-        self.assertLessEqual(len(m.group(1)), 1024, "desc 超 1024 会被平台静默丢弃")
+        # v4.5.0：量折叠后的值（平台实收），原始块缩进换行虚高
+        folded = " ".join(l.strip() for l in m.group(1).splitlines())
+        self.assertLessEqual(len(folded), 1024, "desc 超 1024 会被平台静默丢弃")
 
     def test_frontmatter_five_keys_present(self):
         import re

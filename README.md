@@ -222,6 +222,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v4.6.0** — completeness for Chinese citation forms: [EB/OL] entries (drug labels, guidelines, consensus docs) now contribute their URLs to reachability and source-tier checks when no stronger identifier exists; abbreviation-period splitting no longer fragments U.S.-style organization names into title pieces; approval numbers (H20093320-style) no longer masquerade as publication years; `--discover` gains `--discover-since` year filtering and cross-source same-paper merging.
+
 **v4.5.0** — literature discovery: `--discover "topic"` searches PubMed + OpenAlex and feeds every hit through the full verification stack - a born-verified reference list with GB/T 7714 / BibTeX export; `--demo` runs a bundled 8-reference sample (3 planted fakes) for a zero-setup tour of the verdict pipeline; description now carries literature-search reach terms.
 
 **v4.4.0** — reference-list completeness audit: `--check-document` reports orphan references (listed but never cited in the body) and coverage stats - a writing-integrity advisory that never changes verdicts; one-file mode runs extraction, verification and in-text cross-checking from a single document path; in-text citation extraction truncates at the reference section, fixing false citation counts from list numbering.

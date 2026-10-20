@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "4.5.0"
+VERSION = "4.6.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -1021,14 +1021,17 @@ def _ta_for_journal(source: str) -> str:
     return _CN_JOURNAL_TA.get(s) or str(source or "").strip()
 
 
-def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0) -> tuple:
+def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
+                  since: int = None) -> tuple:
     """v4.5.0 文献发现：主题 → PubMed + OpenAlex 双源检索 → 候选清单。
 
     把 skill 从「验已有的文献」扩展为「找文献且出生即核验」——检索结果天然
     带官方标识符（PMID/DOI），交回主管道后走全部既有核验栈（含撤稿检测），
     输出一份每条都验过的文献清单（GB/T/BibTeX 一键导出）。
     返回 (refs, notes)：单源失败静默跳过（绝不因单源失败崩批）；
-    跨源按 doi/pmid/题名规一化去重。"""
+    跨源按 doi/pmid/题名规一化去重；since 过滤出版年（近 N 年检索）。
+    v4.6.0：跨源题名合并——同一论文一侧带 DOI 一侧仅题名时合并字段不再重复
+    （原三级互斥键只认同键，跨源残余重复）。"""
     refs, notes = [], []
     seen = set()
 
@@ -1131,7 +1134,27 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0) -> tuple:
         if ou:
             _cb_record(ou, True)
         notes.append("OpenAlex 检索失败——本源跳过")
-    return refs, notes
+    # v4.6.0：since 出版年过滤（无年份条目保留——宁多勿错杀）
+    if since and int(since) >= 1900:  # 审计 P3：0/负数静默无效→下限门
+        refs = [r for r in refs if not r.get("year") or int(r["year"]) >= int(since)]
+    # 跨源题名合并：同题不同键（一侧 DOI 一侧仅题名）字段互补
+    by_title, merged = {}, []
+    for r in refs:
+        tk = "t:" + re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", r["title"].lower())[:60]
+        hit = by_title.get(tk)
+        if hit is None:
+            by_title[tk] = r
+            merged.append(r)
+        else:
+            # 审计 P3：60 字符前缀碰撞可能是不同论文（如 part one vs part one
+            # extended）——年份不相容不融合，防 crosscheck 假 invalid
+            yr_ok = (not hit.get("year") or not r.get("year")
+                     or abs(int(hit["year"]) - int(r["year"])) <= 1)
+            if yr_ok:
+                for k, v in r.items():
+                    if v and not hit.get(k):
+                        hit[k] = v
+    return merged, notes
 
 
 def pubmed_locator_lookup(source: str, year, volume, issue, pages,
@@ -2334,11 +2357,16 @@ def parse_markdown_refs(text: str) -> list:
         rest = (mm.group(3) or "").strip()
         if not rest:
             continue
-        segs = [s.strip(" *") for s in re.split(r"\.\s+", rest) if s.strip(" *")]
+        # 缩写句点不劈（v4.6.0 dogfood 实锤：'U.S. Food and Drug Administration'
+        # 被切分器劈开，机构名当了题名）——「单大写字母+.」紧跟的句点不切分；
+        # 普通首字母缩略后的题名界（如 N H. Title）不受影响
+        segs = [s.strip(" *") for s in re.split(r"(?<![A-Z]\.[A-Z])\.\s+", rest)
+                if s.strip(" *")]
         if len(segs) < 2:
             continue
         year = None
-        ym = re.search(r"(19|20)\d{2}", rest)
+        # 后随数字的年份排除（批准文号 H20093320 里的 2009 不是年份）
+        ym = re.search(r"(19|20)\d{2}(?!\d)", rest)
         if ym:
             year = int(ym.group(0))
         # 无作者段变体判定：GB/T 允许题名先行著录（`题名[J]. 期刊, 年, 卷(期): 页.`，
@@ -2369,6 +2397,13 @@ def parse_markdown_refs(text: str) -> list:
         dm = re.search(r"\b(10\.\d{4,9}/[^\s，,;；)]+)", rest)
         if dm:
             entry["doi"] = dm.group(1).rstrip(".,;)")
+        # v4.6.0：EB/OL 著录的 URL 提取（说明书/指南/共识的中文医学文档高频形态）
+        # ——仅当无 doi/pmid（强锚优先不遮蔽）；[EB/OL] 引用从裸 unverified 升
+        # 「可达性+官方层级」判据
+        if "doi" not in entry and "pmid" not in entry:
+            um = re.search(r"https?://[^\s，,;；)\]。，＞>”（“]+", rest)
+            if um:
+                entry["url"] = um.group(0).rstrip(".>）")
         # 卷(期):页 锚定在年份之后提取（避免误抓随机数字）。
         # 实测形态：`2024, 62(11): 1030-1042` / `2014, 134(5): e1474-502` /
         #           `2020, 8: 218`（无期）/ `2020, 35(12)`（无页）
@@ -4667,6 +4702,8 @@ def main() -> int:
                                        '结果带官方标识符交全栈核验——出生即核验（如 --discover "bronchiolitis diagnosis"）')
     ap.add_argument("--discover-limit", type=int, default=10,
                     help="文献发现每源条数上限（默认 10，封顶 25）")
+    ap.add_argument("--discover-since", type=int, default=None,
+                    help="文献发现出版年下限（如 --discover-since 2020 只收 2020 及以后）")
     ap.add_argument("--demo", action="store_true",
                     help="v4.5.0 零门槛体验：用内置样例清单（8 条含 3 处预埋伪造）跑完整判定流程")
     ap.add_argument("--claims", help="内联 JSON 引用数组（同 --refs 的 schema）")
@@ -4850,7 +4887,8 @@ def main() -> int:
             print("❌ 文献发现需要联网检索——--offline 模式不适用", file=sys.stderr)
             return 2
         _drefs, _dnotes = discover_refs(args.discover, args.discover_limit,
-                                        args.timeout)
+                                        args.timeout,
+                                        since=getattr(args, "discover_since", None))
         for _n in _dnotes:
             print(f"[discover] {_n}")
         if _drefs:

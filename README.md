@@ -222,6 +222,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v4.7.0** — robustness for dotted-initial citation forms: European dotted-initial authors (HANSEN J.J. Title) self-heal into author + title behind a three-gate check (type-code tail, dotted-initial head shape, no year-comma) - titles containing U.S./U.K./Q.T.-style abbreviations are untouched, and abbreviation dots eaten by the guarded splits are restored; `--discover-sort cited|newest` orders literature discovery by citations or date with an honest PubMed fallback declaration.
+
 **v4.6.0** — completeness for Chinese citation forms: [EB/OL] entries (drug labels, guidelines, consensus docs) now contribute their URLs to reachability and source-tier checks when no stronger identifier exists; abbreviation-period splitting no longer fragments U.S.-style organization names into title pieces; approval numbers (H20093320-style) no longer masquerade as publication years; `--discover` gains `--discover-since` year filtering and cross-source same-paper merging.
 
 **v4.5.0** — literature discovery: `--discover "topic"` searches PubMed + OpenAlex and feeds every hit through the full verification stack - a born-verified reference list with GB/T 7714 / BibTeX export; `--demo` runs a bundled 8-reference sample (3 planted fakes) for a zero-setup tour of the verdict pipeline; description now carries literature-search reach terms.

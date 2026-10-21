@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "4.6.0"
+VERSION = "4.7.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -1022,7 +1022,7 @@ def _ta_for_journal(source: str) -> str:
 
 
 def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
-                  since: int = None) -> tuple:
+                  since: int = None, sort: str = "relevance") -> tuple:
     """v4.5.0 文献发现：主题 → PubMed + OpenAlex 双源检索 → 候选清单。
 
     把 skill 从「验已有的文献」扩展为「找文献且出生即核验」——检索结果天然
@@ -1058,10 +1058,15 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
         refs.append(ref)
 
     limit = max(1, min(int(limit or 10), 25))
-    # 源一：PubMed 主题检索（官方题录，PMID 天然在握）
+    sort = sort if sort in ("relevance", "cited", "newest") else "relevance"
+    # 源一：PubMed 主题检索（官方题录，PMID 天然在握）；newest→pub_date，
+    # cited→relevance（PubMed 无被引序，回退并在 notes 声明）
+    pm_sort = "pub_date" if sort == "newest" else "relevance"
+    if sort == "cited":
+        notes.append("PubMed 无被引排序——该源按相关性回退")
     try:
         u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-             + _ncbi_qs(f"?db=pubmed&retmode=json&retmax={limit}&sort=relevance"
+             + _ncbi_qs(f"?db=pubmed&retmode=json&retmax={limit}&sort={pm_sort}"
                         f"&term={quote(topic)}"))
         if not _cb_open(u):
             _ncbi_rate_wait()
@@ -1107,7 +1112,9 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
     try:
         q = quote(topic, safe="")
         ou = (f"https://api.openalex.org/works?search={q}&per-page={limit}"
-              "&select=display_name,publication_year,doi,primary_location")
+              "&select=display_name,publication_year,doi,primary_location"
+              + ("&sort=cited_by_count:desc" if sort == "cited" else
+                 "&sort=publication_date:desc" if sort == "newest" else ""))
         okey = _OPTS.get("openalex_key") or ""
         if okey:
             ou += f"&api_key={quote(okey, safe='')}"
@@ -2372,7 +2379,29 @@ def parse_markdown_refs(text: str) -> list:
         # 无作者段变体判定：GB/T 允许题名先行著录（`题名[J]. 期刊, 年, 卷(期): 页.`，
         # 机构共识/指南常见）——segs[0] 以文献类型标记结尾即为题名段
         if re.search(r"\[[A-Z]{1,2}(?:/OL)?\]\s*$", segs[0] or ""):
-            title, source = segs[0], (segs[1] if len(segs) >= 2 else "")
+            # v4.7.0 点式缩写自愈（审计 P2-A 语义级修复）：链式缩写守卫保护了
+            # U.S. 型机构名，也把欧式点式作者（HANSEN J.J. Title[J]）并进了首段。
+            # 自愈条件：首段含 ". "（有被守卫吞掉的切分点）+ 基线切分的尾段仍以
+            # 类型码结尾（=真题名）+ 头部含点式缩写模式（J.J——区别于普通题名）
+            # + 无年份逗号（非期刊段）。三者齐备才拆回，普通题名零影响。
+            parts0 = [p.strip(" *") for p in re.split(r"\.\s+", segs[0])
+                      if p.strip(" *")]
+            # 审计 P1 形态门：作者头（首段）须呈「姓氏 点式缩写」（HANSEN J.J /
+            # SMITH A.B, JONES C.D）——题名自身含 U.S./Q.T.（Cost-effectiveness
+            # of U.S. pharmacogenomics...）时形态不符，不拆（基线行为保持）。
+            # 题名重建取 parts0[1:] 全部（题名内部的点式缩写也被守卫切开过）
+            _authorish = parts0[0].count(" ") <= 4 and all(
+                re.match(r"^[A-Za-z'\u2019\-]+(?:,? [A-Z](?:\.[A-Z])+\.?)?$",
+                         p.strip()) for p in parts0[0].split(",") if p.strip())
+            if (len(parts0) >= 2 and _authorish
+                    and re.search(r"\[[A-Z]{1,2}(?:/OL)?\]\s*$", parts0[-1])
+                    and not re.search(r"[,，]\s*(19|20)\d{2}", segs[0])):
+                # 该分支的内部切分点全是被守卫阻断的链式缩写（字母.字母.），
+                # 切分吃掉的句点属题名本体——". " 重组还原（Q.T. interval 形态）
+                segs = [parts0[0], ". ".join(parts0[1:])] + segs[1:]
+                title, source = segs[1], (segs[2] if len(segs) >= 3 else "")
+            else:
+                title, source = segs[0], (segs[1] if len(segs) >= 2 else "")
         elif len(segs) >= 3:
             title, source = segs[1], segs[2]
         else:
@@ -4704,6 +4733,10 @@ def main() -> int:
                     help="文献发现每源条数上限（默认 10，封顶 25）")
     ap.add_argument("--discover-since", type=int, default=None,
                     help="文献发现出版年下限（如 --discover-since 2020 只收 2020 及以后）")
+    ap.add_argument("--discover-sort", choices=("relevance", "cited", "newest"),
+                    default="relevance",
+                    help="文献发现排序：relevance 相关性（默认）/ cited 被引优先"
+                         "（OpenAlex 直通，PubMed 无此序回退 relevance）/ newest 最新优先")
     ap.add_argument("--demo", action="store_true",
                     help="v4.5.0 零门槛体验：用内置样例清单（8 条含 3 处预埋伪造）跑完整判定流程")
     ap.add_argument("--claims", help="内联 JSON 引用数组（同 --refs 的 schema）")
@@ -4888,7 +4921,9 @@ def main() -> int:
             return 2
         _drefs, _dnotes = discover_refs(args.discover, args.discover_limit,
                                         args.timeout,
-                                        since=getattr(args, "discover_since", None))
+                                        since=getattr(args, "discover_since", None),
+                                        sort=getattr(args, "discover_sort",
+                                                     "relevance"))
         for _n in _dnotes:
             print(f"[discover] {_n}")
         if _drefs:

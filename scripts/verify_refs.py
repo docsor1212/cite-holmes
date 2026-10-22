@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "4.7.0"
+VERSION = "4.8.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -534,35 +534,7 @@ def _cross_lingual_bridge(doi: str, claimed: str, meta: dict,
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             return None
 
-    def _fetch_landing(url):
-        """手动逐跳抓取落地页（≤3 跳），每跳过 scheme+SSRF 双门，返回 HTML 或 None。
-        断路器接线（审计 A3）：主机连续传输失败时本批跳过，与全局外呼同规。"""
-        for _hop in range(4):
-            if not str(url).lower().startswith(("http://", "https://")):
-                return None
-            if ssrf_blocked(url) or _cb_open(url):
-                return None
-            try:
-                req = urllib.request.Request(url, headers={
-                    "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{VERSION})"})
-                opener = urllib.request.build_opener(_NoRedirect)
-                with opener.open(req, timeout=timeout) as resp:
-                    html = resp.read(262144).decode("utf-8", "ignore")
-                _cb_record(url, False)
-                return html
-            except urllib.error.HTTPError as e:
-                _cb_record(url, False)  # 站点有响应：不计传输失败
-                loc = e.headers.get("Location") if e.headers else None
-                if e.code in (301, 302, 303, 307, 308) and loc:
-                    url = urllib.request.urljoin(url, loc)
-                    continue
-                return None
-            except Exception:
-                _cb_record(url, True)
-                return None
-        return None
-
-    html = _fetch_landing(res_url)
+    html = _fetch_landing_html(res_url, timeout)
     if html:
         m = (re.search(r'<meta[^>]+name="citation_title"[^>]+content="([^"]+)"',
                        html, re.I)
@@ -1747,6 +1719,78 @@ def wayback_available(url: str, timeout: float) -> str:
     return ""
 
 
+def _fetch_landing_html(url: str, timeout: float):
+    """手动逐跳抓取落地页（≤3 跳），每跳过 scheme+SSRF 双门，返回 HTML 或 None。
+    断路器接线（审计 A3）：主机连续传输失败时本批跳过，与全局外呼同规。
+    v4.8.0 自桥接内嵌提取到模块级——EB/OL 落地页对照（landing_title_check）复用。"""
+    class _NoRedirect(urllib.request.HTTPRedirectHandler):
+        def redirect_request(self, req, fp, code, msg, headers, newurl):
+            return None
+    for _hop in range(4):
+        if not str(url).lower().startswith(("http://", "https://")):
+            return None
+        if ssrf_blocked(url) or _cb_open(url):
+            return None
+        try:
+            req = urllib.request.Request(url, headers={
+                "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{VERSION})"})
+            opener = urllib.request.build_opener(_NoRedirect)
+            with opener.open(req, timeout=timeout) as resp:
+                html = resp.read(262144).decode("utf-8", "ignore")
+            _cb_record(url, False)
+            return html
+        except urllib.error.HTTPError as e:
+            _cb_record(url, False)  # 站点有响应：不计传输失败
+            loc = e.headers.get("Location") if e.headers else None
+            if e.code in (301, 302, 303, 307, 308) and loc:
+                url = urllib.request.urljoin(url, loc)
+                continue
+            return None
+        except Exception:
+            _cb_record(url, True)
+            return None
+    return None
+
+
+def landing_title_check(url: str, title: str, timeout: float) -> tuple:
+    """v4.8.0 EB/OL/URL 引用落地页题名对照：页面 <title>/citation_title/og:title
+    与声称题名 _title_sim 对照——≥0.75 确认存在（调用方封顶 partial 转人工：
+    落地页只证「这条 URL 讲的就是这篇」的存在性，语义支撑归语义层）。
+    页面无题名/低相似/抓取失败一律静默（查无永不判死）。返回 (note, confirmed)。"""
+    html = _fetch_landing_html(url, timeout)
+    if not html:
+        return "", False
+    cands = []
+    for pat in (r'<meta[^>]+name="citation_title"[^>]+content="([^"]+)"',
+                r'<meta[^>]+content="([^"]+)"[^>]+name="citation_title"',
+                r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"',
+                r"<title[^>]*>(.*?)</title>"):
+        m = re.search(pat, html, re.I | re.S)
+        if m and m.group(1).strip():
+            cands.append(re.sub(r"\s+", " ", m.group(1)).strip())
+    # 站点品牌后缀剥离（" - DailyMed" / " | Journal Home" 类——真网探针实证
+    # 后缀稀释相似度 0.78→0.70）。分隔符两侧必须有空白：词内连字符（COVID-19/
+    # anti-TNF/State-of-the-Art 生物医学高频形态）绝不自削——审计 P1 实证任意
+    # 位置开削使连字符题名 perfect match 也 confirmed=False 且静默；确认线 0.75
+    # 对齐桥接落地页先例（citation_title 同款阈值）。partial 封顶转人工，
+    # 误确认的代价=多一条人工复核不是错判
+    cands = [re.sub(r"\s+[-|–—]\s+.*$", "", c).strip() for c in cands]
+    cands = [c for c in cands if c]
+    best = max((_title_sim(title, c) for c in cands), default=0.0)
+    # 方向性包含通道：页面题名较短且词汇全部出现在声称题名中（说明书/标签页
+    # 题名=声称题名的前缀子集是常态——"USP prescribing information" 尾缀稀释
+    # 双通道相似度到 0.74 的真网探针实证）；≥3 词防单词页误伤
+    tw = set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", str(title).lower()))
+    subset_hit = any(
+        (cw := set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", c.lower())))
+        and len(cw) >= 3 and cw.issubset(tw) for c in cands)
+    if best >= 0.75 or subset_hit:
+        return (f"落地页题名对照一致（相似度 {best:.2f}）", True)
+    if best >= 0.60:
+        return (f"落地页题名近似（相似度 {best:.2f}），建议人工复核", False)
+    return "", False
+
+
 def check_url(url: str, timeout: float, retries: int = 1) -> tuple:
     """返回 (reachable, status, note)。reachable 以 2xx/3xx/429(反爬) 计。
     瞬态网络错误（超时/连接重置）自动重试一次——国内网络偶发抖动不误判。
@@ -2809,6 +2853,19 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
             why.append(f"来源层级为 {out['tier']}（非权威层）")
         if miss:
             why.append(f"缺字段 {','.join(miss)}")
+        # v4.8.0 落地页题名对照（EB/OL 靶型）：partial 因非权威层/缺字段而
+        # URL 可达时，抽页面题名对照——一致=「这条 URL 讲的就是这篇」的存在性
+        # 证据，注记补强不改判定（partial 仍转人工；误确认代价=多一次人工复核）
+        if (out["url"] and not offline and not retracted
+                and (out.get("checks", {}).get("url") or {}).get("reachable")):
+            lt_note, lt_confirmed = landing_title_check(out["url"],
+                                                        out["title"], timeout)
+            out["checks"]["landing"] = {"ran": True, "confirmed": lt_confirmed}
+            if lt_confirmed:
+                why.append("落地页题名对照一致（存在性佐证）")
+                out["needs_human_check"] = True
+            elif lt_note:
+                why.append(lt_note)
         out["verdict"] = "partial"
         out["note"] = (out["note"] + "；" if out["note"] else "") + "；".join(why)
 

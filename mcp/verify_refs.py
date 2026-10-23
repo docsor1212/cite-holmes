@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "4.8.0"
+VERSION = "4.9.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -1012,7 +1012,7 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
                 f"pmid:{pmid}" if pmid else
                 "t:" + re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", (title or "").lower())[:60])
 
-    def _add(doi, pmid, title, source, year):
+    def _add(doi, pmid, title, source, year, cited_by=None):
         doi = (doi or "").replace("https://doi.org/", "").strip()
         pmid = str(pmid or "").strip()
         title = re.sub(r"\s+", " ", str(title or "")).strip()
@@ -1027,6 +1027,8 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
             ref["doi"] = doi
         if pmid and PMID_RE.match(pmid):
             ref["pmid"] = pmid
+        if isinstance(cited_by, int) and cited_by >= 0:
+            ref["_cited_by"] = cited_by  # v4.9.0 综述工作台展示用（核验期 S2 优先）
         refs.append(ref)
 
     limit = max(1, min(int(limit or 10), 25))
@@ -1084,7 +1086,7 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
     try:
         q = quote(topic, safe="")
         ou = (f"https://api.openalex.org/works?search={q}&per-page={limit}"
-              "&select=display_name,publication_year,doi,primary_location"
+              "&select=display_name,publication_year,doi,primary_location,cited_by_count"
               + ("&sort=cited_by_count:desc" if sort == "cited" else
                  "&sort=publication_date:desc" if sort == "newest" else ""))
         okey = _OPTS.get("openalex_key") or ""
@@ -1100,7 +1102,8 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
                 _add(w.get("doi"), None, w.get("display_name"),
                      ((w.get("primary_location") or {}).get("source") or {}).get("display_name")
                      if isinstance(w.get("primary_location"), dict) else "",
-                     w.get("publication_year"))
+                     w.get("publication_year"),
+                     cited_by=w.get("cited_by_count"))
         else:
             notes.append("OpenAlex 断路器跳过")
     except urllib.error.HTTPError as e:
@@ -1133,6 +1136,10 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
                 for k, v in r.items():
                     if v and not hit.get(k):
                         hit[k] = v
+                # 审计 P2-2：_cited_by=0 是有效测量值，falsy 守卫不得吞掉
+                if (hit.get("_cited_by") is None
+                        and r.get("_cited_by") is not None):
+                    hit["_cited_by"] = r["_cited_by"]
     return merged, notes
 
 
@@ -4027,6 +4034,62 @@ def _gbt_type_code(r: dict) -> tuple:
     return "EB/OL", True
 
 
+def _gbt7714_entry(r: dict, cite_date: str) -> str:
+    """v4.9.0 单条 GB/T 7714 行构造（自 export_gbt7714 抽出——综述工作台内联
+    复用同一构造器，杜绝双实现漂移）。不满足收录判定返回 None。
+    收录策略:verified 全收;partial 仅当 DOI 元数据**一致**(adjust=="" 且有 CSL,
+    如仅缺可选输入字段)——标题/期刊存疑的 partial 不收(宁缺毋错)。"""
+    dm = r.get("checks", {}).get("doi_metadata", {}) or {}
+    if r["verdict"] == "verified":
+        pass
+    elif (r["verdict"] == "partial" and dm.get("adjust") == ""
+          and dm.get("matched") and dm.get("csl")):
+        pass  # 元数据一致、仅缺可选输入字段的 partial:注册库已确认存在与内容
+    else:
+        return None
+    csl = (r.get("checks", {}).get("doi_metadata", {}) or {}).get("csl") or {}
+    title = (csl.get("title") or r.get("title") or "").strip() or "untitled"
+    year = str(csl.get("year") or r.get("year") or "").strip()
+    authors = list(csl.get("authors") or [])
+    if not authors:
+        raw = re.split(r"[,，;；、]", str(r.get("authors") or ""))
+        authors = [a.strip() for a in raw if a.strip()]
+    cjk_title = any("\u4e00" <= c <= "\u9fff" for c in title)
+    et_al = "等" if cjk_title else "et al"
+    if len(authors) > 3:
+        authors = authors[:3] + [et_al]
+    author_str = ", ".join(authors)
+    tcode, is_e = _gbt_type_code(r)
+    seg = []
+    if author_str:
+        seg.append(author_str + ".")
+    seg.append(f"{title}[{tcode}].")
+    container = (csl.get("container") or r.get("source") or "").strip()
+    vol = csl.get("volume") or ""
+    iss = csl.get("issue") or ""
+    page = csl.get("page") or ""
+    if tcode == "J" and container:
+        part = f"{container}, {year or 's.d.'}"
+        if vol:
+            part += f", {vol}"
+            if iss:
+                part += f"({iss})"
+        if page:
+            part += f": {page}"
+        seg.append(part + ".")
+    else:
+        if year:
+            seg.append(f"({year}).")
+        seg.append(f"[{cite_date}].")
+    url = (r.get("url") or "").strip()
+    doi = (r.get("doi") or "").strip()
+    if doi and not url.lower().startswith("https://doi.org/"):
+        seg.append(f"DOI: {doi}.")  # DOI 尾注(规范形);url 为 doi.org 链接时已承载
+    if url:
+        seg.append(f"{url}.")
+    return " ".join(seg)
+
+
 def export_gbt7714(results: list, path: str) -> int:
     """v3.6 GB/T 7714-2025 参考文献表导出(verified + 元数据一致的 partial,返回条数)。
     每条以注册库权威 CSL 元数据为准(mcp:checks.doi_metadata.csl;输入声称值兜底):
@@ -4034,65 +4097,118 @@ def export_gbt7714(results: list, path: str) -> int:
       电子: 题名[EB/OL]. (发布年)[引用日期]. URL. DOI: ...
     作者规则:≤3 全列;>3 取前 3 + ", 等"(中文条目)/", et al."(拉丁条目);
     拉丁作者姓全大写+名首字母(取自 CSL 预格式化)。正文中文条目判定=题名含 CJK。
-    收录策略:verified 全收;partial 仅当 DOI 元数据**一致**(adjust=="" 且有 CSL,
-    如仅缺可选输入字段)——标题/期刊存疑的 partial 不收(宁缺毋错)。"""
-    n = 0
+    v4.9.0 起行构造抽为 _gbt7714_entry（综述工作台内联复用同一构造器）。"""
     cite_date = time.strftime("%Y-%m-%d")
-    lines_out = []
+    lines_out = [ln for ln in (_gbt7714_entry(r, cite_date) for r in results) if ln]
+    with open(path, "w", encoding="utf-8") as f:
+        f.write("\n".join(lines_out) + ("\n" if lines_out else ""))
+    return len(lines_out)
+
+
+def build_review_kit(results: list, refs: list = None, topic: str = "",
+                     cite_date: str = "") -> str:
+    """v4.9.0 F25 综述工作台：把核验批转成「综述就绪」Markdown 三件套——
+    综述表格（verified 优先）/标注书目/即贴 GB/T 参考文献表。
+    零新增外呼：被引数复用核验期已取的 S2 citation contexts（checks.
+    citation_contexts.cited_by），discover 场景回退检索时顺带的 OpenAlex
+    cited_by_count（refs[i]["_cited_by"]）——两处皆无则诚实「—」。
+    判定语义原样透出：partial/invalid 条目绝不混入「已核实」观感（铁律：
+    存在性佐证与判定分离）；GB/T 内联表与 export_gbt7714 同一构造器
+    （_gbt7714_entry），收录策略同为宁缺毋错。"""
+    refs = refs or []
+    cite_date = cite_date or time.strftime("%Y-%m-%d")
+    order = {"verified": 0, "partial": 1, "unreachable": 2, "unverified": 3,
+             "invalid": 4}
+    rows = sorted(results, key=lambda r: (order.get(r.get("verdict"), 9),
+                                          r.get("index", 0)))
+    counts = {}
     for r in results:
-        dm = r.get("checks", {}).get("doi_metadata", {}) or {}
-        if r["verdict"] == "verified":
-            pass
-        elif (r["verdict"] == "partial" and dm.get("adjust") == ""
-              and dm.get("matched") and dm.get("csl")):
-            pass  # 元数据一致、仅缺可选输入字段的 partial:注册库已确认存在与内容
-        else:
-            continue
+        counts[r["verdict"]] = counts.get(r["verdict"], 0) + 1
+    stat = "｜".join(f"{VERDICT_ZH.get(v, v)} {c}" for v, c in
+                     sorted(counts.items(), key=lambda kv: order.get(kv[0], 9)))
+
+    def _cited(r):
+        # 审计 P2-2：0 是测得的零，与未知（—）必须可区分——isinstance 门而非 truthy
+        cc = (r.get("checks", {}) or {}).get("citation_contexts") or {}
+        if cc.get("ran") and isinstance(cc.get("cited_by"), int):
+            return f"{cc['cited_by']}（Semantic Scholar）"
+        i = r.get("index")
+        cb = refs[i - 1].get("_cited_by") if isinstance(refs, list) and isinstance(
+            i, int) and 0 <= i - 1 < len(refs) and isinstance(refs[i - 1], dict) else None
+        if isinstance(cb, int):
+            return f"{cb}（OpenAlex）"
+        return "—"
+
+    def _authors_short(r):
         csl = (r.get("checks", {}).get("doi_metadata", {}) or {}).get("csl") or {}
-        title = (csl.get("title") or r.get("title") or "").strip() or "untitled"
-        year = str(csl.get("year") or r.get("year") or "").strip()
         authors = list(csl.get("authors") or [])
         if not authors:
             raw = re.split(r"[,，;；、]", str(r.get("authors") or ""))
             authors = [a.strip() for a in raw if a.strip()]
-        cjk_title = any("\u4e00" <= c <= "\u9fff" for c in title)
-        et_al = "等" if cjk_title else "et al"
-        if len(authors) > 3:
-            authors = authors[:3] + [et_al]
-        author_str = ", ".join(authors)
-        tcode, is_e = _gbt_type_code(r)
-        seg = []
-        if author_str:
-            seg.append(author_str + ".")
-        seg.append(f"{title}[{tcode}].")
-        container = (csl.get("container") or r.get("source") or "").strip()
-        vol = csl.get("volume") or ""
-        iss = csl.get("issue") or ""
-        page = csl.get("page") or ""
-        if tcode == "J" and container:
-            part = f"{container}, {year or 's.d.'}"
-            if vol:
-                part += f", {vol}"
-                if iss:
-                    part += f"({iss})"
-            if page:
-                part += f": {page}"
-            seg.append(part + ".")
-        else:
-            if year:
-                seg.append(f"({year}).")
-            seg.append(f"[{cite_date}].")
-        url = (r.get("url") or "").strip()
-        doi = (r.get("doi") or "").strip()
-        if doi and not url.lower().startswith("https://doi.org/"):
-            seg.append(f"DOI: {doi}.")  # DOI 尾注(规范形);url 为 doi.org 链接时已承载
-        if url:
-            seg.append(f"{url}.")
-        lines_out.append(" ".join(seg))
-        n += 1
-    with open(path, "w", encoding="utf-8") as f:
-        f.write("\n".join(lines_out) + ("\n" if lines_out else ""))
-    return n
+        if not authors:
+            return ""
+        cjk = any("\u4e00" <= c <= "\u9fff" for c in str(r.get("title") or ""))
+        return ", ".join(authors[:3]) + ("，等" if (cjk and len(authors) > 3)
+                                         else "，et al" if len(authors) > 3 else "")
+
+    out = []
+    out.append("# 文献综述工作台（review-kit）\n")
+    out.append(f"- 主题：{topic or '（输入清单）'}｜生成：{cite_date}｜"
+               f"cite-holmes v{VERSION}")
+    out.append(f"- 核验总览：共 {len(results)} 条——{stat}")
+    out.append("- 判定语义：verified=官方注册库核验一致；partial=部分确认，"
+               "引用前请人工过目；invalid=编造或错引（不得引用）；"
+               "unverified/unreachable=未能核验（查无永不判死）\n")
+
+    out.append("## 一、综述表格（verified 优先，同判定保持原序）\n")
+    out.append("| # | 文献 | 年份 | 出处 | 被引 | 判定 |")
+    out.append("|---|---|---|---|---|---|")
+    for n_, r in enumerate(rows, 1):
+        t = re.sub(r"[|\n]", "／", str(r.get("title") or ""))  # P3③ 剥换行对齐 md_cell
+        src = re.sub(r"[|\n]", "／", str(r.get("source") or "")) or "—"
+        yr = r.get("year") or "—"
+        flag = "⚠需人工" if r.get("needs_human_check") else ""
+        out.append(f"| {n_} | {t} | {yr} | {src} | {_cited(r)} "
+                   f"| {VERDICT_ZH.get(r.get('verdict'), r.get('verdict'))}{flag} |")
+    out.append("")
+
+    out.append("## 二、标注书目\n")
+    for n_, r in enumerate(rows, 1):
+        au = _authors_short(r)
+        head = f"**[{n_}] {r.get('title') or '(无标题)'}**"
+        meta = " — ".join(x for x in (au, str(r.get("source") or ""),
+                                      str(r.get("year") or "")) if x)
+        out.append(f"{head}" + (f"  \n{meta}" if meta else ""))
+        vline = f"判定：{VERDICT_ZH.get(r.get('verdict'), r.get('verdict'))}"
+        if r.get("needs_human_check"):
+            vline += " ⚠需人工"  # 审计 P2-3：与综述表格旗标对齐
+        note = re.sub(r"\s+", " ", str(r.get("note") or ""))[:140]
+        if note:
+            vline += f"——{note}"
+        out.append(f"  - {vline}")
+        if str(r.get("doi") or "").strip():
+            out.append(f"  - DOI: https://doi.org/{str(r['doi']).strip()}")
+        if str(r.get("pmid") or "").strip():
+            out.append(f"  - PMID: https://pubmed.ncbi.nlm.nih.gov/"
+                       f"{str(r['pmid']).strip()}/")
+    out.append("")
+
+    out.append("## 三、即贴参考文献表（GB/T 7714-2025，宁缺毋错：仅收 verified"
+               "与元数据一致的 partial）\n")
+    gbt = [(i, _gbt7714_entry(r, cite_date)) for i, r in enumerate(rows, 1)]
+    gbt = [(i, ln) for i, ln in gbt if ln]
+    if gbt:
+        for i, ln in gbt:
+            out.append(f"[{i}] {ln}")
+    else:
+        out.append("（本批无满足收录判定的条目——非编造信号，仅按「宁缺毋错」"
+                   "策略暂不收录；判定明细见正文报告）")
+    out.append("")
+    out.append("---")
+    out.append("使用说明：partial/⚠ 条目引用前须人工核对；本表由机械核验生成，"
+               "「核验一致」≠「支撑你的论点」——语义支撑请自行判断或用语境层"
+               "（citation contexts）复核。复跑加 --refresh-cache 可强制重验。")
+    return "\n".join(out)
 
 
 def export_ris(results: list, path: str) -> int:
@@ -4794,6 +4910,10 @@ def main() -> int:
                     default="relevance",
                     help="文献发现排序：relevance 相关性（默认）/ cited 被引优先"
                          "（OpenAlex 直通，PubMed 无此序回退 relevance）/ newest 最新优先")
+    ap.add_argument("--review-kit", action="store_true",
+                    help="v4.9.0 综述工作台：报告之外另出「综述就绪」三件套文件"
+                         "（综述表格+标注书目+即贴 GB/T 参考文献表，每条带官方核验"
+                         "判定与被引数；配合 --discover 主题检索即查即验即用）")
     ap.add_argument("--demo", action="store_true",
                     help="v4.5.0 零门槛体验：用内置样例清单（8 条含 3 处预埋伪造）跑完整判定流程")
     ap.add_argument("--claims", help="内联 JSON 引用数组（同 --refs 的 schema）")
@@ -5214,6 +5334,8 @@ def main() -> int:
         print(explain_ref(target) if target else
               f"第 {args.explain} 条不存在——有效范围 1-{len(results)}")
 
+    if getattr(args, "review_kit", False) and not args.export:
+        args.export = "gbt7714,bibtex"  # 综述工作台：即贴书目+BibTeX 默认齐活
     if args.export:
         base = args.out.rsplit(".", 1)[0] if "." in args.out else args.out
         for fmt in [x.strip().lower() for x in args.export.split(",") if x.strip()]:
@@ -5240,6 +5362,17 @@ def main() -> int:
                 print(f"导出：{p}（透明工作底稿：逐项检查明细）")
             else:
                 print(f"⚠️ 未知导出格式 {fmt}（支持 bibtex,gbt7714,ris,csv,auditjson）", file=sys.stderr)
+
+    if getattr(args, "review_kit", False):
+        base = args.out.rsplit(".", 1)[0] if "." in args.out else args.out
+        _kit_path = base + ".review_kit.md"
+        _kit = build_review_kit(results, refs, topic=str(getattr(args, "discover", "") or ""),
+                                cite_date=time.strftime("%Y-%m-%d"))
+        with open(_kit_path, "w", encoding="utf-8") as f:
+            f.write(_kit)
+        _n_kit = sum(1 for _ln in _kit.splitlines() if re.match(r"\[\d+\] ", _ln))
+        print(f"综述工作台：{_kit_path}（综述表格/标注书目/即贴 GB/T 参考文献表 "
+              f"{_n_kit} 条）")
 
     bad = [r for r in results if r["verdict"] in ("unreachable", "invalid")]
     print(f"\n报告：{args.out}\nJSON：{json_path}")

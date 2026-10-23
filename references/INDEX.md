@@ -23,6 +23,7 @@
 | 写检索式/选信源 | search-strategies.md | 抄信源金字塔前三行 |
 | 正文引用与清单对不上 | faq.md「check-document」 | `--check-document paper.md` |
 | 出 GB·T 7714 / BibTeX 表 | faq.md「导出」 | `--export gbt7714,bibtex` |
+| 查文献做综述 | SKILL「综述工作台」+ anti-patterns#16 | `--discover "主题" --review-kit` |
 | 弱网/国内网络 | faq.md「国内网络」 | `--cn` 或 `--proxy` |
 | 遇到疑似误用 | anti-patterns.md | 通读一遍（每条带替代方案） |
 | 统一用词/报告语言对齐 | GLOSSARY.md | 正词表（五态/信号/错误码），带 Avoid 列表 |

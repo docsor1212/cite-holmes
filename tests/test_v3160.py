@@ -45,8 +45,8 @@ class TestCardFirstLine(unittest.TestCase):
         self.assertIn("文献管理×AI幻觉检测", zh)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "4.8.0")
-        self.assertIn("version: 4.8.0",
+        self.assertEqual(vr.VERSION, "4.9.0")
+        self.assertIn("version: 4.9.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
 

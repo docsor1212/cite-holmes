@@ -222,6 +222,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v4.9.0** — review kit: `--discover "topic" --review-kit` is a one-command literature workflow (comparison table + annotated bibliography + paste-ready GB/T list, every row verdicted, partial never reads as verified); bilingual SKILL hierarchy restructure; domestic-network FAQ expansion; real-data sample.
+
 **v4.8.0** — landing-page title cross-check for EB/OL partials (existence evidence recorded in the workpaper, never a verdict change) and a widened release-chain polling window.
 
 **v4.7.0** — robustness for dotted-initial citation forms: European dotted-initial authors (HANSEN J.J. Title) self-heal into author + title behind a three-gate check (type-code tail, dotted-initial head shape, no year-comma) - titles containing U.S./U.K./Q.T.-style abbreviations are untouched, and abbreviation dots eaten by the guarded splits are restored; `--discover-sort cited|newest` orders literature discovery by citations or date with an honest PubMed fallback declaration.
@@ -295,7 +297,7 @@ or gate your CI on it (`--strict`).
   (verdict semantics / evidence steps / error-code translations / notes /
   completeness / recommended action). Docs get a usability pass: every deep
   reference now opens with a 30-second entry (when to read it, shortest
-  path), the anti-pattern list grew from 8 to 14 entries each with a
+  path), the anti-pattern list grew from 8 to 14 entries (now 16) each with a
   concrete alternative, the FAQ covers clone pairs / profiling / preprint
   hints / bridging, and INDEX.md gained a task-based 30-second routing
   table. 411 tests green.

@@ -228,3 +228,18 @@ Kana（日文）/ Hangul（韩文）。声称题名与注册库登记题名**主
 3. **大批量限流边界**：反查走 E-utilities（无 key 3 req/s）——实测 30 条连续反查中后段
    可能触发 NCBI 限流静默未命中。大批量医学文档建议：配 `NCBI_API_KEY`（提至 10 req/s）
    或分批（每批 ≤20 条）重跑；报告 `checks.pubmed_reverse` 的限流注记可辨识受影响条目。
+
+## `--review-kit`（v4.9.0 综述工作台）
+
+报告与 JSON 之外另出 `<out-stem>.review_kit.md` 三件套：综述表格（verified
+优先、同判定保持原序，带被引数与 ⚠需人工 旗标）/标注书目（判定语义+注记
+摘要+DOI/PMID 链）/即贴 GB/T 7714 参考文献表。未显式给 `--export` 时自动补
+`gbt7714,bibtex` 导出（显式指定则完全以用户为准）。
+
+- **被引数来源（零新增外呼）**：优先核验期 S2 citation contexts
+  （`checks.citation_contexts.cited_by`，仅 DOI 条目）；`--discover` 场景回退
+  OpenAlex 检索响应自带的 `cited_by_count`；两者皆无显示「—」。
+- **GB/T 内联表与 `--export gbt7714` 同一构造器**（`_gbt7714_entry`），
+  收录策略同为「宁缺毋错」：verified 全收，partial 仅当 DOI 元数据一致。
+- **判定语义原样透出**：partial/invalid 绝不混入「已核实」观感；工作台是
+  交付物形态，不是判定升级通路（铁律：存在性佐证与判定分离）。

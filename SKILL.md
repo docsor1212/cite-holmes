@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 4.8.0
+version: 4.9.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -32,14 +32,11 @@ One line: **a question goes in — a verified report comes out.**
 
 Three differences from a plain "search and summarize":
 
-1. **Calibrate before working** — ask sharp questions first; the most expensive
-   waste is researching the wrong question.
-2. **Conclusions carry evidence grades** — 🟢 two independent sources agree /
-   🟡 single authority / 🔴 contested.
-3. **Every citation is checked** — mechanical layer (reachability, domain
-   authority, field completeness, dedup) plus semantic layer (does the source
-   actually support the claim?). Unverified references never masquerade as real.
+1. **Calibrate before working** — sharp questions first; the costliest waste is researching the wrong question.
+2. **Conclusions carry evidence grades** — 🟢 two independent sources agree / 🟡 single authority / 🔴 contested.
+3. **Every citation is checked** — mechanical layer (reachability, authority, completeness, dedup) + semantic layer (does the source support the claim?); unverified references never masquerade as real.
 
+---
 ## ⛔ Iron rules (zero exceptions)
 
 1. **Never fabricate**: citations must come from pages actually fetched this
@@ -53,6 +50,21 @@ Three differences from a plain "search and summarize":
 5. **Calibrate before searching** (FULL mode): scope / timeframe / audience /
    output format must be locked first.
 
+---
+## 30-second quickstart
+
+```bash
+# 1. references as JSON (title/url/source/year) — or a Zotero .bib
+# 2. verify:
+python scripts/verify_refs.py --refs refs.json --out report.md
+# 3. read report.md — CiteScore + pre-submission conclusion at the top.
+# Paper? add --export bibtex.  Medical? add --profile medical.
+# Literature hunt? --discover "topic" --review-kit — every hit verified at
+# birth, review-ready table + annotated bibliography + GB/T out.
+# Already verified once? add --grill report.json for the review checklist.
+```
+
+---
 ## Step 0: mode selection
 
 | Mode | Fits | Calibration | Budget | Output |
@@ -60,9 +72,8 @@ Three differences from a plain "search and summarize":
 | **QUICK** | Single fact-check: "is this claim true", "when was X released" | skipped | ≤6 | short report |
 | **FULL** | Open research: "state of X", "A vs B", "do a survey" | mandatory | ≤15 | full report |
 
-One verifiable fact → QUICK. Synthesis or trade-offs → FULL. "Quick check"
-forces QUICK; "thorough" forces FULL. Unsure → FULL. Pre-submission
-bibliography final check skips this choice: `--preset submission` (one flag =
+One verifiable fact → QUICK. Synthesis or trade-offs → FULL. Unsure → FULL.
+Pre-submission final check skips this: `--preset submission` (one flag =
 strict + GB·T/BibTeX/CSV exports).
 
 ## Five-phase workflow
@@ -124,6 +135,7 @@ dual-reader header** + **CiteScore** (0-100 + A-D grade) + a one-line
 | Non-MEDLINE journals (identifier-less) | OpenAlex anchor search → DOI resolution: the aggregator is only an index, the verdict evidence comes entirely from the DOI registry (retraction checks still run on the anchored DOI) |
 | Retraction checks at scale | `tools/build_retraction_cache.py` builds a local Retraction Watch index from the official daily-updated dump — `--retraction-cache` then verifies offline with notice granularity |
 | Literature discovery | `--discover "topic"` searches PubMed + OpenAlex and verifies every hit at birth - a verified reference list out, GB/T 7714 / BibTeX export ready; `--discover-since 2020` filters by year; `--discover-sort cited|newest` orders by citations or date; `--demo` runs the bundled 8-reference sample (3 planted fakes) for a zero-setup tour |
+| Review kit (literature review) | `--review-kit` turns any verified batch into a review-ready file: comparison table (verified first, citations-per-paper shown) + annotated bibliography + paste-ready GB/T 7714 list — with `--discover` it is a one-command literature workflow; verdicts stay verdicts (partial is never "verified") |
 | EB/OL references (guidelines, labels) | URLs in [EB/OL]-style entries are extracted (when no stronger identifier exists) and routed through reachability + source-tier checks; when such a reference lands partial, the page <title> is cross-checked against the claim and a match is recorded as existence evidence in the workpaper |
 | Reference-list completeness | `--check-document` audits orphans (listed but never cited — a writing-integrity advisory, never a verdict) and coverage; one-file mode: pass the document alone and the reference section is auto-extracted |
 | Wayback archive links | attached to dead links automatically |
@@ -147,6 +159,7 @@ that agrees.
 | Task | Flags |
 |---|---|
 | Medical topics | `--easy` · `--profile medical` |
+| Literature review build-out | `--discover "topic" --review-kit` (table + annotated bibliography + GB/T) |
 | Share / archive | `--format html` |
 | Export | `--export bibtex,gbt7714,ris,csv,auditjson` |
 | CI | `--strict` · `--offline` |
@@ -171,6 +184,8 @@ list and mark each as answered / partially answered / unresolved (with the
 budget ledger: rounds used, remaining), then gaps, disagreements, follow-up
 questions.
 
+---
+
 ## Files
 
 | File | When |
@@ -181,17 +196,16 @@ questions.
 | `references/security.md` | full security & behavior declaration |
 | `docs/adr/` | architecture decision records (public layer) |
 | `mcp/server.py` | optional MCP server (same engine) |
-| `references/search-strategies.md` | read before SEARCH |
-| `references/report-template.md` | SYNTHESIZE skeleton; refs schema |
 | `references/verification-details.md` | full option semantics, thresholds |
 | `references/anti-patterns.md` | misuse catalog, each with an alternative |
 | `references/faq.md` | common questions |
 | `references/medical-mode.md` | read before medical/clinical work |
 | `examples/demo_refs.json` | 8 refs, 3 planted fabrications |
+| `examples/review-kit-sample.md` | real-data review-kit output (discover → verify → kit) |
 
 ## ⚠️ Common mistakes
 
-See `references/anti-patterns.md` (14 entries, each with the right way
+See `references/anti-patterns.md` (16 entries, each with the right way
 instead). The two that matter most: never treat `verified` as "the content is
 correct" — that is the semantic layer's job; never treat `unreachable` as
 "fake" — retry via `--cn`/`--proxy` first.
@@ -204,19 +218,5 @@ correct" — that is the semantic layer's job; never treat `unreachable` as
   pubmed.ncbi.nlm.nih.gov); zero telemetry. Full text: `references/security.md`
 - Honest limits & explicit non-goals: `references/out-of-scope.md`
 - Common questions: `references/faq.md`
-
-## 30-second quickstart
-
-```bash
-# 1. references as JSON (title/url/source/year) — or a Zotero .bib
-# 2. verify:
-python scripts/verify_refs.py --refs refs.json --out report.md
-# 3. read report.md — CiteScore + pre-submission conclusion at the top.
-# Paper? add --export bibtex.  Medical? add --profile medical.
-# Already verified once? add --grill report.json for the review checklist.
-```
-
-## Environment fallback
-
-Without web tools: state honestly that only the "user-supplied material +
-mechanical verification" mode is possible; never pretend to search.
+- No web tools? Say honestly that only "user-supplied material + mechanical
+  verification" is possible — never pretend to search.

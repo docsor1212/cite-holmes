@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 4.9.0
+version: 5.0.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -136,14 +136,13 @@ dual-reader header** + **CiteScore** (0-100 + A-D grade) + a one-line
 | Retraction checks at scale | `tools/build_retraction_cache.py` builds a local Retraction Watch index from the official daily-updated dump — `--retraction-cache` then verifies offline with notice granularity |
 | Literature discovery | `--discover "topic"` searches PubMed + OpenAlex and verifies every hit at birth - a verified reference list out, GB/T 7714 / BibTeX export ready; `--discover-since 2020` filters by year; `--discover-sort cited|newest` orders by citations or date; `--demo` runs the bundled 8-reference sample (3 planted fakes) for a zero-setup tour |
 | Review kit (literature review) | `--review-kit` turns any verified batch into a review-ready file: comparison table (verified first, citations-per-paper shown) + annotated bibliography + paste-ready GB/T 7714 list — with `--discover` it is a one-command literature workflow; verdicts stay verdicts (partial is never "verified") |
+| Scholarly usage (citation contexts) | Semantic Scholar citing contexts show usage distribution (methodology/background/result) + one sample quote in reports and the review kit — enhancement signal only, never a verdict; absent data renders nothing |
 | EB/OL references (guidelines, labels) | URLs in [EB/OL]-style entries are extracted (when no stronger identifier exists) and routed through reachability + source-tier checks; when such a reference lands partial, the page <title> is cross-checked against the claim and a match is recorded as existence evidence in the workpaper |
 | Reference-list completeness | `--check-document` audits orphans (listed but never cited — a writing-integrity advisory, never a verdict) and coverage; one-file mode: pass the document alone and the reference section is auto-extracted |
 | Wayback archive links | attached to dead links automatically |
 | Completeness scoring | how many export fields the registry CSL can back-fill |
 | Speed | 20-ref mixed list ≈18s at `--workers 4` (default), ≈7s cache-warm, ≈47s serial — measured table: `references/verification-details.md` |
 | Weak network | `--proxy` / `--cn` / `--preflight`; auto degraded-network mode after 3+ registry transport failures |
-
-Full semantics: `references/verification-details.md`.
 
 #### Semantic layer (the model)
 

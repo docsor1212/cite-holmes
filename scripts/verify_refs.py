@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "4.9.0"
+VERSION = "5.0.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -4191,6 +4191,9 @@ def build_review_kit(results: list, refs: list = None, topic: str = "",
         if str(r.get("pmid") or "").strip():
             out.append(f"  - PMID: https://pubmed.ncbi.nlm.nih.gov/"
                        f"{str(r['pmid']).strip()}/")
+        _ul = usage_line(r.get("citation_contexts"))
+        if _ul:
+            out.append(f"  - 学界用法（≤3 条抽样）：{_ul}")  # 审计 P3-2：kit 无区级免责，就地声明
     out.append("")
 
     out.append("## 三、即贴参考文献表（GB/T 7714-2025，宁缺毋错：仅收 verified"
@@ -4331,6 +4334,37 @@ def precheck_conclusion(sc: dict) -> str:
     return "✅ 投稿前结论：全部 verified——可进入投稿流程"
 
 
+_INTENTS_ZH = {"methodology": "方法学", "background": "背景", "result": "结果"}
+
+
+def usage_line(cc) -> str:
+    """v5.0.0 学界用法一句话（报告与综述工作台共用）：S2 引文语境的用法分布
+    （方法学/背景/结果）+高影响引用数+第一条例引摘句。增强信号，绝不参与判定；
+    无数据返回空串（调用方整段不渲染）。"""
+    if (not isinstance(cc, dict)
+            or not isinstance(cc.get("samples"), list)
+            or not cc.get("samples")):
+        return ""
+    intents = {}
+    for s in cc.get("samples", []):
+        for it in (s.get("intents") or []):
+            intents[it] = intents.get(it, 0) + 1
+    parts = [f"{_INTENTS_ZH.get(k, k)}×{v}" for k, v in
+             sorted(intents.items(), key=lambda kv: -kv[1])]
+    seg = []
+    if parts:
+        seg.append("用法分布 " + "/".join(parts))
+    n_inf = sum(1 for s in cc.get("samples", []) if s.get("influential"))
+    if n_inf:
+        seg.append(f"高影响引用 {n_inf}")
+    s0 = (cc.get("samples") or [{}])[0]
+    quote = re.sub(r"\s+", " ", str(s0.get("context") or ""))[:100]
+    ct = str(s0.get("citing_title") or "")[:40]
+    if quote:
+        seg.append("例引「" + quote + "」" + (f"——{ct}" if ct else ""))
+    return "；".join(seg)
+
+
 def render_md(results: list, offline: bool, profile: str = "general",
               context_check: dict = None) -> str:
     sc = compute_scorecard(results)
@@ -4390,6 +4424,17 @@ def render_md(results: list, offline: bool, profile: str = "general",
         lines += ["", "support 取值：supported 支撑 / partial 部分支撑 / not_in_source "
                   "来源未包含 / contradicted 相矛盾 / unclear 无法判定；"
                   "not_in_source 与 contradicted 的条目已封顶 partial 并转人工复核。"]
+    # v5.0.0 学界用法区（S2 引文语境；无数据整段不渲染——老输出逐字节不变）
+    usage_rows = [r for r in results if usage_line(r.get("citation_contexts"))]
+    if usage_rows:
+        lines += ["", "## 学界用法（引文语境）", "",
+                  "后续文献如何使用该论文——语境是增强信号，绝不改变判定；覆盖率低属诚实边界。",
+                  "| # | 被引 | 学界用法 |",
+                  "|---|---|---|"]
+        for r in usage_rows:
+            _cc = r.get("citation_contexts") or {}
+            lines.append(f"| {r['index']} | {_cc.get('cited_by', '—')} | "
+                         f"{md_cell(usage_line(_cc), 130)} |")
     lines += ["", "## 能力边界矩阵", "",
               "- ✅ 机械层已抓伪造类型：" + "；".join(capability_matrix()["caught"]),
               "- 🧠 仍需语义层把关：" + "；".join(capability_matrix()["semantic"]),
@@ -4894,6 +4939,21 @@ def run_doctor(net: bool = False, timeout: float = 6.0,
         print(f"verdict: usable with caveats（{n_warn} 项 WARN）——可跑批，注意降级提示")
     else:
         print("verdict: all clear——环境就绪，可直接跑批")
+    if net:  # v5.0.0 国内直连建议（评测 domestic 弱项定向：可达源统计+决策提示）
+        _pc = [s for n, s, _ in checks if n.startswith("探针·")]
+        if _pc:
+            _ok = sum(1 for s in _pc if s == "PASS")
+            if _ok == len(_pc):
+                _adv = "全部注册库直连可达——无需代理，直接跑批"
+            elif _ok >= 2:
+                _adv = (f"{_ok}/{len(_pc)} 源直连可用——DOI/PubMed 主通路在列时小批量可直连；"
+                        "完整覆盖建议 --proxy，或 --cn（超时抬升 + DOI.org 三败自动回源 Crossref）")
+            else:
+                _adv = ("直连可用源不足——建议配置 --proxy（或 HTTPS_PROXY 环境变量）后重跑本自检；"
+                        "探针明细显示「可达但限流/需 key」时优先配 S2_API_KEY/OPENALEX_API_KEY"
+                        "（代理解不了缺 key）；磁盘缓存 7 天 TTL，重跑只补漏不重复付费")
+            print("── 国内直连建议 ──")
+            print(f"  {_adv}")
     return 1 if n_fail else 0
 
 

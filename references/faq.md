@@ -1,5 +1,7 @@
 # FAQ (moved out of SKILL.md in v1.9 to keep the main guide short)
 
+> **30 秒导航**：高频问题速查——网络（--cn/--proxy/降级）、API key、导出（GB·T/BibTeX/RIS）、判定语义、上下文核验；Ctrl+F 搜关键词，或从 INDEX.md 按任务路由。
+
 **Q: Is a `verified` citation guaranteed real?**
 No. The mechanical layer catches machine-checkable fakes: nonexistent DOIs,
 fabricated PMIDs (via E-utilities), fabricated arXiv IDs (via the official
@@ -183,3 +185,9 @@ note 里附带了登记英文原题，扫一眼与你认知的论文一致即可
 `OPENALEX_API_KEY`。配不上也不影响核验主通路——DOI.org/PubMed/arXiv 不依赖
 OpenAlex；OpenAlex 只在「无标识符引用找锚」与「文献发现」两处参与，失败时
 相应条目诚实降级并给出可操作提示。
+
+## Q: `--doctor --net` 末尾的「国内直连建议」怎么看？（v5.0.0）
+它统计各注册库探针的直连可达数并给决策提示：全部 PASS→直接跑批；≥2 源可用→
+小批量可直连，完整覆盖建议 `--proxy` 或 `--cn`（超时抬升+DOI.org 三败自动回源
+Crossref）；可用源不足→先配代理再跑。磁盘缓存 7 天 TTL，配好后重跑只补漏。
+建议每次更换网络环境后先跑一次本自检。

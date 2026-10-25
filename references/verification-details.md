@@ -1,5 +1,7 @@
 # Verification details (v1.10)
 
+> **30 秒导航**：五态判定完整阈值与检查明细——先看判定语义节，再按标识符（DOI/PMID/arXiv/URL）查对应检查；开关语义含 --cn/--proxy/--review-kit/--doctor。
+
 > **30 秒入口**：何时读我——想弄懂某个判定为什么是 partial/invalid、或要配 --judge-url/--nli-url 等进阶旗标时。最短路径：先看「五态判定」表 + `--explain N`（CLI 直接人话解释单条，v3.12）再决定要不要深读本篇。回 [INDEX.md](INDEX.md)。
 
 

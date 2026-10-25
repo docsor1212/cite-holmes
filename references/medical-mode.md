@@ -1,5 +1,7 @@
 # 医学研究模式（MEDICAL 模式必读）
 
+> **30 秒导航**：医学证据模式——信源金字塔、CEBM 分级、监管信源清单、--profile medical 与 --easy 的关系；临床决策引用前必读。
+
 > **30 秒入口**：何时读我——临床/医学问题核验前。最短路径：抄「信源金字塔」+ PubMed 检索式，然后 `--profile medical --easy` 一把跑。回 [INDEX.md](INDEX.md)。
 
 

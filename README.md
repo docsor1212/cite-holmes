@@ -222,6 +222,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v5.0.0** — scholarly usage panel (citation-context intents + sample citing quotes in reports and the review kit, enhancement signal only, never verdict-changing); `--doctor --net` domestic direct-reach advisory; 30-second navigation headers on long reference docs.
+
 **v4.9.0** — review kit: `--discover "topic" --review-kit` is a one-command literature workflow (comparison table + annotated bibliography + paste-ready GB/T list, every row verdicted, partial never reads as verified); bilingual SKILL hierarchy restructure; domestic-network FAQ expansion; real-data sample.
 
 **v4.8.0** — landing-page title cross-check for EB/OL partials (existence evidence recorded in the workpaper, never a verdict change) and a widened release-chain polling window.

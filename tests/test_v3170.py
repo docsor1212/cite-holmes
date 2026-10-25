@@ -12,8 +12,8 @@ import verify_refs as vr  # noqa: E402
 
 class TestVersion(unittest.TestCase):
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "5.0.0")
-        self.assertIn("version: 5.0.0",
+        self.assertEqual(vr.VERSION, "5.1.0")
+        self.assertIn("version: 5.1.0",
                       open(os.path.join(HERE, "..", "SKILL.md"), encoding="utf-8").read())
 
 

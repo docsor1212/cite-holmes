@@ -137,9 +137,9 @@ class TestDocsUsability(unittest.TestCase):
             self.assertIn(kw, t)
 
     def test_dn_keyword_expansion(self):
-        # F4:displayName 词根「文献管理」上车;desc 补 GB-T/参考文献格式/投稿前终检
+        # F4(v5.1.0 换血):displayName 词根「深度研究·学术研究」上车;desc 补 GB-T/参考文献格式/投稿前终检
         t = open(os.path.join(HERE, "..", "SKILL_ZH.md"), encoding="utf-8").read()
-        self.assertIn("displayName: 引用核查·参考文献验真｜文献管理×AI幻觉检测", t)
+        self.assertIn("displayName: 深度研究·学术研究｜引用核查×AI幻觉检测", t)
         self.assertIn("GB-T 7714", t)
         self.assertIn("参考文献格式", t)
 
@@ -159,7 +159,7 @@ class TestDocsUsability(unittest.TestCase):
             d = yaml.safe_load(fm)
             self.assertEqual(
                 d["metadata"]["displayName"],
-                "引用核查·参考文献验真｜文献管理×AI幻觉检测")
+                "深度研究·学术研究｜引用核查×AI幻觉检测")
         except ImportError:
             pass  # 无 pyyaml 环境退化为上方文本断言
 
@@ -177,7 +177,7 @@ class TestDocsUsability(unittest.TestCase):
         self.assertEqual(len(vr._ERR_CODE_ZH), 12)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "5.0.0")
+        self.assertEqual(vr.VERSION, "5.1.0")
 
 
 if __name__ == "__main__":

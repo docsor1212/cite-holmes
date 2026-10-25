@@ -222,6 +222,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v5.1.0** — SkillHub display name calibration: leads with deep research · academic research (this skill has always been citation-verifying deep research); all keyword roots retained in the description; zero capability change.
+
 **v5.0.0** — scholarly usage panel (citation-context intents + sample citing quotes in reports and the review kit, enhancement signal only, never verdict-changing); `--doctor --net` domestic direct-reach advisory; 30-second navigation headers on long reference docs.
 
 **v4.9.0** — review kit: `--discover "topic" --review-kit` is a one-command literature workflow (comparison table + annotated bibliography + paste-ready GB/T list, every row verdicted, partial never reads as verified); bilingual SKILL hierarchy restructure; domestic-network FAQ expansion; real-data sample.

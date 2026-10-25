@@ -42,11 +42,11 @@ class TestCardFirstLine(unittest.TestCase):
     def test_metadata_single_block(self):
         zh = open(os.path.join(SK, "SKILL_ZH.md"), encoding="utf-8").read()
         self.assertEqual(zh.split("---")[1].count("metadata:"), 1)
-        self.assertIn("文献管理×AI幻觉检测", zh)
+        self.assertIn("深度研究·学术研究｜引用核查×AI幻觉检测", zh)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "5.0.0")
-        self.assertIn("version: 5.0.0",
+        self.assertEqual(vr.VERSION, "5.1.0")
+        self.assertIn("version: 5.1.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
 

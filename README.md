@@ -222,6 +222,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v5.2.0** — deep-research workflow controls: `--plan` plan artifact (validated & rendered, never auto-edited), `--preset deep` budget tier, `--source-policy journal_only,deny-domain=x.com` (curation at discovery, annotation at verify - never verdicts), `--trace` append-only research ledger. Zero verdict-semantics change.
+
 **v5.1.0** — SkillHub display name calibration: leads with deep research · academic research (this skill has always been citation-verifying deep research); all keyword roots retained in the description; zero capability change.
 
 **v5.0.0** — scholarly usage panel (citation-context intents + sample citing quotes in reports and the review kit, enhancement signal only, never verdict-changing); `--doctor --net` domestic direct-reach advisory; 30-second navigation headers on long reference docs.

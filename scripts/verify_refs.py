@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "5.1.0"
+VERSION = "5.2.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -994,7 +994,8 @@ def _ta_for_journal(source: str) -> str:
 
 
 def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
-                  since: int = None, sort: str = "relevance") -> tuple:
+                  since: int = None, sort: str = "relevance",
+                  policy: dict = None) -> tuple:
     """v4.5.0 文献发现：主题 → PubMed + OpenAlex 双源检索 → 候选清单。
 
     把 skill 从「验已有的文献」扩展为「找文献且出生即核验」——检索结果天然
@@ -1012,7 +1013,7 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
                 f"pmid:{pmid}" if pmid else
                 "t:" + re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", (title or "").lower())[:60])
 
-    def _add(doi, pmid, title, source, year, cited_by=None):
+    def _add(doi, pmid, title, source, year, cited_by=None, src_type=None):
         doi = (doi or "").replace("https://doi.org/", "").strip()
         pmid = str(pmid or "").strip()
         title = re.sub(r"\s+", " ", str(title or "")).strip()
@@ -1029,6 +1030,8 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
             ref["pmid"] = pmid
         if isinstance(cited_by, int) and cited_by >= 0:
             ref["_cited_by"] = cited_by  # v4.9.0 综述工作台展示用（核验期 S2 优先）
+        if src_type:
+            ref["_src_type"] = str(src_type)  # v5.2.0 信源政策（journal_only 过滤依据）
         refs.append(ref)
 
     limit = max(1, min(int(limit or 10), 25))
@@ -1099,11 +1102,13 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
                 oj = json.loads(oresp.read().decode("utf-8", "ignore"))
             _cb_record(ou, False)
             for w in (oj.get("results") or []):
+                _src_obj = ((w.get("primary_location") or {}).get("source")
+                            if isinstance(w.get("primary_location"), dict) else {}) or {}
                 _add(w.get("doi"), None, w.get("display_name"),
-                     ((w.get("primary_location") or {}).get("source") or {}).get("display_name")
-                     if isinstance(w.get("primary_location"), dict) else "",
+                     _src_obj.get("display_name"),
                      w.get("publication_year"),
-                     cited_by=w.get("cited_by_count"))
+                     cited_by=w.get("cited_by_count"),
+                     src_type=_src_obj.get("type"))
         else:
             notes.append("OpenAlex 断路器跳过")
     except urllib.error.HTTPError as e:
@@ -1140,7 +1145,152 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
                 if (hit.get("_cited_by") is None
                         and r.get("_cited_by") is not None):
                     hit["_cited_by"] = r["_cited_by"]
+    if policy and policy.get("journal_only"):  # v5.2.0 信源策展（discover 期硬过滤）
+        _n0 = len(merged)
+        merged = [r for r in merged
+                  if r.get("pmid")  # PubMed 题录天然期刊
+                  or r.get("_src_type") == "journal"]
+        if len(merged) < _n0:
+            notes.append(f"信源政策 journal_only：过滤 {_n0 - len(merged)} 条"
+                         "非期刊源（预印本/知识库/未知类型）")
     return merged, notes
+
+
+_CALIBRATE_KEYS = ("scope", "timeframe", "audience", "format")
+
+
+def render_plan_artifact(plan: dict, out_path: str):
+    """v5.2.0 F28 协作式研究计划工件（Google DR collaborative_planning 借鉴）：
+    PLAN 阶段的机械层——校验计划 JSON 完整性并渲染人读 md 工件
+    （CALIBRATE 四要素表+子问题复选框+预算台账脚手架）。
+    硬失败（subquestions 空/budget_searches 非正整数/结构非对象）返回 None
+    （错误已打印，调用方 return 2）；CALIBRATE 要素缺失=软 WARN（agent 可用
+    声明过的默认值，不阻断协作流）。引擎只校验与渲染，绝不替用户改计划。"""
+    if not isinstance(plan, dict):
+        print("❌ 研究计划须为 JSON 对象（--plan plan.json）", file=sys.stderr)
+        return None
+    subs = plan.get("subquestions")
+    if (not isinstance(subs, list) or not subs
+            or not all(isinstance(s, str) and s.strip() for s in subs)):
+        print("❌ subquestions 必填：非空字符串数组（研究计划的子问题清单）",
+              file=sys.stderr)
+        return None
+    budget = plan.get("budget_searches")
+    if not isinstance(budget, int) or isinstance(budget, bool) or budget < 1:
+        print("❌ budget_searches 必填：正整数（本轮检索预算上限）", file=sys.stderr)
+        return None
+    try:
+        _bstr = str(budget)  # 审计 P2-1：CPython int→str 4300 位上限——超长友好失败
+    except ValueError:
+        print("❌ budget_searches 数值超长（>4300 位）——请给合理预算（如 40）",
+              file=sys.stderr)
+        return None
+    warns = [f"calibrate.{k} 未填写——agent 侧应以声明过的默认值补齐" for k in
+             _CALIBRATE_KEYS if not str(plan.get(k) or "").strip()]
+    lines = ["# 研究计划（协作工件）", "",
+             f"- 生成：{time.strftime('%Y-%m-%d %H:%M')} · cite-holmes v{VERSION}"
+             " 机械层校验渲染（计划由 agent 与用户协作定稿，引擎绝不代改）", ""]
+    lines += ["## CALIBRATE 四要素", "", "| 要素 | 值 |", "|---|---|"]
+    for k in _CALIBRATE_KEYS:
+        v = str(plan.get(k) or "").strip()
+        lines.append(f"| {k} | {md_cell(v, 80) if v else '⚠️ 未填写（建议补齐）'} |")
+    lines += ["", "## 子问题清单", ""]
+    for i, s_ in enumerate(subs, 1):
+        lines.append(f"- [ ] Q{i}. {md_cell(s_.strip(), 120)}")
+    lines += ["", "## 预算台账（SEARCH 期逐轮回填）", "",
+              "| 轮 | 子问题 | 检索式 | 命中 | 取舍 |", "|---|---|---|---|---|"]
+    for i in range(1, min(len(subs), 12) + 1):
+        lines.append(f"| {i} | Q{i} |  |  |  |")
+    lines += ["", f"- 预算上限：{_bstr} 次检索（QUICK≤6 / FULL≤15 / DEEP≤40；"
+              "超预算诚实说明缺口，不硬凑结论）"]
+    if plan.get("source_policy"):
+        lines.append(f"- 信源政策：{plan['source_policy']}")
+    lines += ["", "> 编辑本文件后请同步改 plan.json 再重跑 --plan 校验（md 是渲染"
+              "产物，JSON 才是执行锚点）。"]
+    try:  # 审计 P2-2：不可写路径（目录/无权限）友好失败不裸崩
+        with open(out_path, "w", encoding="utf-8") as f:
+            f.write("\n".join(lines) + "\n")
+    except OSError as e:
+        print(f"❌ 计划工件写入失败：{out_path}（{type(e).__name__}）", file=sys.stderr)
+        return None
+    print(f"[plan] 计划工件已渲染：{out_path}（{len(subs)} 子问题 · 预算 {_bstr}）")
+    return warns
+
+
+def _parse_source_policy(spec: str):
+    """v5.2.0 F30 信源政策解析：journal_only / allow-domain=a.org|b /
+    deny-domain=x.com；逗号分段、竖线分域。非法段返回 None（调用方友好报错）。"""
+    pol = {"journal_only": False, "allow": [], "deny": []}
+    for seg in (spec or "").split(","):
+        seg = seg.strip()
+        if not seg:
+            continue
+        if seg == "journal_only":
+            pol["journal_only"] = True
+            continue
+        for kind in ("allow-domain", "deny-domain"):
+            if seg.startswith(kind + "="):
+                doms = [d.strip().lower() for d in seg[len(kind) + 1:].split("|")
+                        if d.strip()]
+                if not doms:
+                    return None
+                pol["allow" if kind.startswith("allow") else "deny"].extend(doms)
+                break
+        else:
+            return None
+    return pol if (pol["journal_only"] or pol["allow"] or pol["deny"]) else None
+
+
+def _host_of(url: str) -> str:
+    m = re.match(r"https?://([^/:?#]+)", str(url or ""), re.I)
+    return m.group(1).lower() if m else ""
+
+
+def apply_source_policy(results: list, policy: dict, medical: bool = False) -> int:
+    """v5.2.0 F30 信源政策（核验期）：违规**只注记+转人工**，绝不改判定
+    （ADR-0005 纪律：政策是策展偏好不是真伪证据）。deny 命中/allow 未命中/
+    journal_only 下非期刊 web 源 → checks.source_policy + note + needs_human。
+    返回注记条数。"""
+    if not policy:
+        return 0
+    n = 0
+    for r in results:
+        host = _host_of(r.get("url") or "")
+        viol = ""
+        for d in policy.get("deny") or []:
+            if host == d or host.endswith("." + d):
+                viol = f"deny-domain 命中 {d}（该域已被政策排除）"
+                break
+        if not viol and policy.get("allow"):
+            if host and not any(host == d or host.endswith("." + d)
+                                for d in policy["allow"]):
+                viol = "allow-domain 未命中（来源不在政策允许域内）"
+        if (not viol and policy.get("journal_only")
+                and host and r.get("url")):
+            try:
+                if classify_tier(r.get("url") or "", medical) != "journal":
+                    viol = "journal_only：非期刊 web 来源（层级见 tier 列）"
+            except Exception:
+                pass
+        if viol:
+            r.setdefault("checks", {})["source_policy"] = {"violation": viol}
+            r["note"] = ((r.get("note") + "；") if r.get("note") else "") + \
+                f"信源政策：{viol}——引用前请人工确认"
+            r["needs_human_check"] = True
+            n += 1
+    return n
+
+
+def _trace_append(path: str, mode: str, fields: dict) -> None:
+    """v5.2.0 F31 研究底稿（append-only 审计链）：discover/verify 各轮追加
+    轮次记录。只追加绝不改写；写失败静默（底稿是增强产物，绝不阻断主流程）。"""
+    try:
+        with open(os.path.expanduser(path), "a", encoding="utf-8") as f:
+            f.write(f"\n## {time.strftime('%Y-%m-%d %H:%M:%S')} · {mode}\n")
+            for k, v in fields.items():
+                f.write(f"- {k}: {v}\n")
+    except (OSError, ValueError):
+        pass
 
 
 def pubmed_locator_lookup(source: str, year, volume, issue, pages,
@@ -4974,6 +5124,19 @@ def main() -> int:
                     help="v4.9.0 综述工作台：报告之外另出「综述就绪」三件套文件"
                          "（综述表格+标注书目+即贴 GB/T 参考文献表，每条带官方核验"
                          "判定与被引数；配合 --discover 主题检索即查即验即用）")
+    ap.add_argument("--plan", default="",
+                    help="v5.2.0 研究计划工件：PLAN 阶段的结构化计划 JSON 路径"
+                         "（subquestions/budget_searches 必填，CALIBRATE 四要素缺失"
+                         "给 WARN）——引擎做完整性校验并渲染人读工件，绝不替用户改计划")
+    ap.add_argument("--plan-out", default="",
+                    help="研究计划渲染输出路径（默认 research_plan.md；配合 --plan）")
+    ap.add_argument("--source-policy", default="",
+                    help="v5.2.0 信源政策：journal_only（discover 期只留期刊源）/"
+                         "allow-domain=a.org|b.org/deny-domain=x.com（核验期注记+"
+                         "转人工，绝不改判定）；逗号分段、竖线分域")
+    ap.add_argument("--trace", default="",
+                    help="v5.2.0 研究底稿：append-only 审计链——discover/verify 各轮"
+                         "追加轮次记录（主题/命中/政策过滤/判定分布），只追加绝不改写")
     ap.add_argument("--demo", action="store_true",
                     help="v4.5.0 零门槛体验：用内置样例清单（8 条含 3 处预埋伪造）跑完整判定流程")
     ap.add_argument("--claims", help="内联 JSON 引用数组（同 --refs 的 schema）")
@@ -4993,10 +5156,12 @@ def main() -> int:
     ap.add_argument("--preflight", action="store_true",
                     help="v3.7.0 注册库预检面板:核验前探测各官方源可达性(3s 超时),"
                          "弱网环境先看状态再跑批")
-    ap.add_argument("--preset", choices=["submission"], default="",
+    ap.add_argument("--preset", choices=["submission", "deep"], default="",
                     help="v3.12 场景预设：submission=投稿前参考文献终检"
                          "（--strict 严格退出码 + --export gbt7714,bibtex,csv 组合，"
-                         "判定语义不变，只打包常用旗标）")
+                         "判定语义不变，只打包常用旗标）；deep=v5.2 深度研究档"
+                         "（discover 上限抬至 25、超时下限 20s；搜索预算 ≤40 轮由"
+                         " agent 侧遵守，建议配 --workers 8）")
     ap.add_argument("--grill", metavar="REPORT_JSON", default="",
                     help="v3.14 对抗审查：对已生成的 JSON 报告出「审稿人预演」问题单"
                          "（逐条最强挑战+清单级追问，纯模板零网络，不改变任何判定）")
@@ -5071,6 +5236,41 @@ def main() -> int:
         print(f"[preset] submission：--strict + --export {args.export} 已组合"
               "（投稿前一键终检；判定语义与默认模式完全一致。"
               "注意 --strict 语义含绕过磁盘缓存读——复跑为全量外呼）")
+    if getattr(args, "preset", "") == "deep":  # v5.2.0 深度研究档（Google DR 分档借鉴）
+        args.discover_limit = max(int(args.discover_limit or 10), 25)
+        args.timeout = max(float(args.timeout or 10.0), 20.0)
+        print("[preset] deep：discover 上限 25 · 超时 ≥20s（搜索预算 ≤40 轮由 agent 侧"
+              "遵守，建议配 --workers 8；判定语义与默认模式完全一致）")
+    _policy = None
+    if getattr(args, "source_policy", ""):
+        _policy = _parse_source_policy(args.source_policy)
+        if _policy is None:
+            print("❌ --source-policy 格式不合法（支持 journal_only / "
+                  "allow-domain=a.org|b.org / deny-domain=x.com；逗号分段、竖线分域）",
+                  file=sys.stderr)
+            return 2
+        _pol_desc = [k for k, v in (("journal_only", _policy["journal_only"]),
+                                    ("allow-domain", _policy["allow"]),
+                                    ("deny-domain", _policy["deny"])) if v]
+        print(f"[policy] 信源政策已装载：{' + '.join(_pol_desc)}"
+              "（discover 期策展过滤；核验期注记不改判定）")
+    if getattr(args, "plan", ""):  # v5.2.0 F28 计划工件：校验+渲染（可独立子命令式退出）
+        try:
+            with open(os.path.expanduser(args.plan), encoding="utf-8") as f:
+                _plan_doc = json.load(f)
+        except (OSError, ValueError) as e:
+            print(f"❌ 研究计划读取失败：{e}（--plan 需要结构化 JSON 计划）", file=sys.stderr)
+            return 2
+        _plan_warns = render_plan_artifact(_plan_doc,
+                                           args.plan_out or "research_plan.md")
+        if _plan_warns is None:
+            return 2  # 硬错误已在函数内打印
+        if _plan_warns:
+            print(f"[plan] 计划工件已渲染，{len(_plan_warns)} 项 WARN（CALIBRATE "
+                  "要素缺失——agent 侧补齐默认值后可重跑校验）")
+        if not (args.refs or args.claims or args.discover
+                or args.check_document or args.demo):
+            return 0  # 仅计划模式：渲染完即退（协作定稿后用户可编辑再执行）
     if getattr(args, "grill", ""):
         gpath = os.path.expanduser(args.grill)
         if not os.path.isfile(gpath):
@@ -5160,9 +5360,16 @@ def main() -> int:
                                         args.timeout,
                                         since=getattr(args, "discover_since", None),
                                         sort=getattr(args, "discover_sort",
-                                                     "relevance"))
+                                                     "relevance"),
+                                        policy=_policy)
         for _n in _dnotes:
             print(f"[discover] {_n}")
+        if getattr(args, "trace", ""):
+            _trace_append(args.trace, "discover", {
+                "topic": args.discover,
+                "limit": args.discover_limit,
+                "命中": f"{len(_drefs)} 条（去重+政策过滤后）",
+                "notes": "；".join(_dnotes) or "（无）"})
         if _drefs:
             refs = _drefs
             print(f"[discover] 双源命中 {len(refs)} 条（去重后）——进入核验栈，出生即核验")
@@ -5349,7 +5556,19 @@ def main() -> int:
             _r["error_codes"] = []
     apply_l4_cascade(results, args.timeout)  # v3.1：L4 证据升级级联（--judge-url 时激活；零配置零变化）
     apply_fast_judge(results, args.timeout)  # v3.5.0：fast-judge 预筛（--fast-judge-url 时激活；零配置零变化）
+    _n_pol = apply_source_policy(results, _policy, medical)  # v5.2.0 注记级，绝不改判定
+    if _n_pol:
+        print(f"[policy] {_n_pol} 条命中信源政策（注记+转人工，判定不变——详见各条注记）")
     scorecard = compute_scorecard(results)
+    if getattr(args, "trace", ""):
+        c2 = scorecard["counts"]
+        _trace_append(args.trace, "verify", {
+            "条数": len(results),
+            "判定": " ".join(f"{k} {c2.get(k, 0)}" for k in
+                            ("verified", "partial", "unreachable", "invalid",
+                             "unverified")),
+            "CiteScore": f"{scorecard['score']}/100 {scorecard['grade']}",
+            "政策注记": _n_pol})
     cd = None
     if getattr(args, "check_document", ""):
         cd = check_document(open(args.check_document, encoding="utf-8",

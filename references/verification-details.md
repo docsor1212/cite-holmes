@@ -245,3 +245,22 @@ Kana（日文）/ Hangul（韩文）。声称题名与注册库登记题名**主
   收录策略同为「宁缺毋错」：verified 全收，partial 仅当 DOI 元数据一致。
 - **判定语义原样透出**：partial/invalid 绝不混入「已核实」观感；工作台是
   交付物形态，不是判定升级通路（铁律：存在性佐证与判定分离）。
+
+
+## 深度研究控制（v5.2.0：--plan / --preset deep / --source-policy / --trace）
+
+- **`--plan plan.json --plan-out plan.md`**：研究计划的机械层校验与渲染。
+  硬失败（exit 2）：subquestions 非非空字符串数组 / budget_searches 非正整数 /
+  结构非对象；CALIBRATE 四要素（scope/timeframe/audience/format）缺失=WARN 不
+  阻断（agent 可用声明过的默认值）。md 是渲染产物，JSON 才是执行锚点；仅
+  `--plan` 不带核验输入时渲染完即退（协作定稿流）。
+- **`--preset deep`**：discover 上限抬至 25、超时下限 20s（单调抬升不覆盖用户
+  显式更大值）；搜索预算 ≤40 轮由 agent 侧遵守；建议配 `--workers 8`。
+- **`--source-policy`**：段格式 `journal_only` / `allow-domain=a.org|b.org` /
+  `deny-domain=x.com`，逗号分隔可组合。discover 期：journal_only 硬过滤
+  （PubMed 题录天然期刊；OpenAlex 按 source.type==journal）。核验期：违规
+  **只注记+转人工**（checks.source_policy + note + needs_human_check），判定
+  永不因政策改变——政策是策展偏好，不是真伪证据（ADR-0005）。
+- **`--trace trace.md`**：append-only 研究底稿，discover/verify 各轮追加
+  （时间戳/主题/命中/判定分布/CiteScore）；只追加绝不改写；写失败静默
+  （底稿绝不阻断主流程）。

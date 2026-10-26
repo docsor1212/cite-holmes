@@ -87,7 +87,8 @@ class TestPresetAndCli(unittest.TestCase):
     def test_preset_in_argparse(self):
         src = open(os.path.join(HERE, "..", "scripts", "verify_refs.py"),
                    encoding="utf-8").read()
-        self.assertIn('choices=["submission"]', src)
+        # v5.2.0 起 preset 双档：submission（投稿终检）+ deep（深度研究档）
+        self.assertIn('choices=["submission", "deep"]', src)
         self.assertIn('args.export = args.export or "gbt7714,bibtex,csv"', src)
         self.assertIn("args.strict = True", src)
         # preset 组合在 doctor 分发之前(parse 后立即)
@@ -177,7 +178,7 @@ class TestDocsUsability(unittest.TestCase):
         self.assertEqual(len(vr._ERR_CODE_ZH), 12)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "5.1.0")
+        self.assertEqual(vr.VERSION, "5.2.0")
 
 
 if __name__ == "__main__":

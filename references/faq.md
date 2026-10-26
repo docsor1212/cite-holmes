@@ -191,3 +191,12 @@ OpenAlex；OpenAlex 只在「无标识符引用找锚」与「文献发现」两
 小批量可直连，完整覆盖建议 `--proxy` 或 `--cn`（超时抬升+DOI.org 三败自动回源
 Crossref）；可用源不足→先配代理再跑。磁盘缓存 7 天 TTL，配好后重跑只补漏。
 建议每次更换网络环境后先跑一次本自检。
+
+
+## Q: 研究计划/信源政策/研究底稿怎么配合五阶段？（v5.2.0）
+PLAN 阶段：agent 起草 `plan.json`（subquestions + budget_searches + CALIBRATE
+四要素）→ `--plan plan.json --plan-out plan.md` 校验渲染 → 用户可编辑（JSON 为
+准）→ 再执行。SEARCH 阶段：`--source-policy journal_only,deny-domain=x.com`
+在文献发现期过滤非期刊源。VERIFY 后：`--trace trace.md` 已逐轮记录审计链
+（append-only）。三件都不改任何判定——计划/政策/底稿是过程治理，真伪判定
+只来自注册库元数据比对。

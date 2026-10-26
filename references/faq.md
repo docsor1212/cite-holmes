@@ -200,3 +200,11 @@ PLAN 阶段：agent 起草 `plan.json`（subquestions + budget_searches + CALIBR
 在文献发现期过滤非期刊源。VERIFY 后：`--trace trace.md` 已逐轮记录审计链
 （append-only）。三件都不改任何判定——计划/政策/底稿是过程治理，真伪判定
 只来自注册库元数据比对。
+
+
+## Q: 研究档案会不会改变判定？评测数字怎么复现？（v5.3.0）
+档案不会：--research-profile 只注入 preset / source_policy / export 三个
+**过程默认值**（显式旗标优先），判定只来自注册库元数据比对。评测：
+`python tools/run_eval.py` 一条命令复现内置金标口径（捕获/实锤/误伤/分布），
+方法论与诚实边界见 `docs/benchmark.md`——离线口径只测结构层，在线数字只对
+当日快照负责。

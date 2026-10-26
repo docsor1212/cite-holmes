@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 5.2.0
+version: 5.3.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -137,7 +137,7 @@ dual-reader header** + **CiteScore** (0-100 + A-D grade) + a one-line
 | Literature discovery | `--discover "topic"` searches PubMed + OpenAlex and verifies every hit at birth - a verified reference list out, GB/T 7714 / BibTeX export ready; `--discover-since 2020` filters by year; `--discover-sort cited|newest` orders by citations or date; `--demo` runs the bundled 8-reference sample (3 planted fakes) for a zero-setup tour |
 | Review kit (literature review) | `--review-kit` turns any verified batch into a review-ready file: comparison table (verified first, citations-per-paper shown) + annotated bibliography + paste-ready GB/T 7714 list — with `--discover` it is a one-command literature workflow; verdicts stay verdicts (partial is never "verified") |
 | Scholarly usage (citation contexts) | Semantic Scholar citing contexts show usage distribution (methodology/background/result) + one sample quote in reports and the review kit — enhancement signal only, never a verdict; absent data renders nothing |
-| Deep-research controls | `--plan plan.json --plan-out plan.md` validates & renders an editable research-plan artifact (collaborative planning); `--preset deep` raises the discovery ceiling (25) and timeout floor (20s); `--source-policy journal_only,deny-domain=x.com` curates discovery hits and annotates policy hits at verify (annotation only, never a verdict); `--trace trace.md` appends a per-round audit log |
+| Deep-research controls | `--plan plan.json --plan-out plan.md` validates & renders an editable research-plan artifact (collaborative planning); `--preset deep` raises the discovery ceiling (25) and timeout floor (20s); `--source-policy journal_only,deny-domain=x.com` curates discovery hits and annotates policy hits at verify (annotation only, never a verdict); `--trace trace.md` appends a per-round audit log; `--research-profile p.json` injects persistent preference defaults (explicit flags win) |
 | EB/OL references (guidelines, labels) | URLs in [EB/OL]-style entries are extracted (when no stronger identifier exists) and routed through reachability + source-tier checks; when such a reference lands partial, the page <title> is cross-checked against the claim and a match is recorded as existence evidence in the workpaper |
 | Reference-list completeness | `--check-document` audits orphans (listed but never cited — a writing-integrity advisory, never a verdict) and coverage; one-file mode: pass the document alone and the reference section is auto-extracted |
 | Wayback archive links | attached to dead links automatically |
@@ -190,11 +190,11 @@ questions.
 
 | File | When |
 |---|---|
-| `scripts/verify_refs.py` | VERIFY mechanical check (pure stdlib, cross-platform) |
+| `scripts/verify_refs.py` · `tools/run_eval.py` | engine (pure stdlib); held-out eval runner |
 | `references/GLOSSARY.md` | canonical terms (five verdicts / signals / error codes) with Avoid lists |
 | `references/out-of-scope.md` | explicit non-goals + honest limits, each with a reason |
 | `references/security.md` | full security & behavior declaration |
-| `docs/adr/` | architecture decision records (public layer) |
+| `docs/adr/` · `docs/benchmark.md` | architecture decisions; published eval methodology |
 | `mcp/server.py` | optional MCP server (same engine) |
 | `references/verification-details.md` | full option semantics, thresholds |
 | `references/anti-patterns.md` | misuse catalog, each with an alternative |

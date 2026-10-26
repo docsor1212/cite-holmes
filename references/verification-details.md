@@ -264,3 +264,15 @@ Kana（日文）/ Hangul（韩文）。声称题名与注册库登记题名**主
 - **`--trace trace.md`**：append-only 研究底稿，discover/verify 各轮追加
   （时间戳/主题/命中/判定分布/CiteScore）；只追加绝不改写；写失败静默
   （底稿绝不阻断主流程）。
+
+
+## 持久研究档案与公开评测（v5.3.0：--research-profile / tools/run_eval.py）
+
+- **`--research-profile p.json`**：跨会话研究偏好。三键（preset / source_policy /
+  export）作**默认值**注入——显式 CLI 旗标优先，只填空缺；未知键注记忽略；
+  非法值 exit 2。档案是过程偏好，绝不改判定语义（与 ADR-0005 同纪律）。
+- **`tools/run_eval.py`**：留出集评测公开口径——内置金标集（8 条 3 预埋伪造）
+  默认 offline 跑，输出 capture_rate / strict_capture / false_kill_rate /
+  判定分布；`--refs your_labeled.json` 自备标注集（expected: planted/clean）、
+  `--net` 在线口径。方法论与最新数字：`docs/benchmark.md`（数字可复现，
+  在线口径只对当日快照负责）。

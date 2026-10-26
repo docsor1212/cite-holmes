@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "5.2.0"
+VERSION = "5.3.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -1279,6 +1279,54 @@ def apply_source_policy(results: list, policy: dict, medical: bool = False) -> i
             r["needs_human_check"] = True
             n += 1
     return n
+
+
+def apply_research_profile(path: str, args):
+    """v5.3.0 F33 持久研究档案：JSON 键作**默认值**注入（显式 CLI 优先——
+    只填空缺旗标，绝不覆盖用户显式值），返回已应用项清单（空表=档案全被
+    显式旗标覆盖/空档案）；硬失败返回 None。未知键注记忽略（不失败）。
+    绝不改判定语义——档案是过程偏好，不是真伪证据。"""
+    try:
+        with open(os.path.expanduser(path), encoding="utf-8") as f:
+            doc = json.load(f)
+    except (OSError, ValueError) as e:
+        print(f"❌ 研究档案读取失败：{e}（--research-profile 需要结构化 JSON）",
+              file=sys.stderr)
+        return None
+    if not isinstance(doc, dict):
+        print("❌ 研究档案须为 JSON 对象（preset/source_policy/export 三键）",
+              file=sys.stderr)
+        return None
+    known = {"preset", "source_policy", "export"}
+    unknown = [k for k in doc if k not in known]
+    if unknown:
+        print(f"[profile] 未知键忽略：{', '.join(unknown)}（支持：preset / "
+              "source_policy / export）")
+    applied = []
+    pv = str(doc.get("preset") or "").strip()
+    if pv and not getattr(args, "preset", ""):
+        if pv not in ("submission", "deep"):
+            print(f"❌ 档案 preset 非法：{pv}（支持 submission/deep）", file=sys.stderr)
+            return None
+        args.preset = pv
+        applied.append(f"preset={pv}")
+    sv = str(doc.get("source_policy") or "").strip()
+    if sv and not getattr(args, "source_policy", ""):
+        if _parse_source_policy(sv) is None:
+            print(f"❌ 档案 source_policy 非法：{sv}", file=sys.stderr)
+            return None
+        args.source_policy = sv
+        applied.append("source_policy=" + sv)
+    ev = str(doc.get("export") or "").strip()
+    if ev and not getattr(args, "export", ""):
+        ok_fmts = {"bibtex", "gbt7714", "gb", "ris", "csv", "auditjson"}
+        bad = [x for x in (t.strip().lower() for t in ev.split(",")) if x and x not in ok_fmts]
+        if bad:
+            print(f"❌ 档案 export 含未知格式：{bad}", file=sys.stderr)
+            return None
+        args.export = ev
+        applied.append(f"export={ev}")
+    return applied
 
 
 def _trace_append(path: str, mode: str, fields: dict) -> None:
@@ -5137,6 +5185,10 @@ def main() -> int:
     ap.add_argument("--trace", default="",
                     help="v5.2.0 研究底稿：append-only 审计链——discover/verify 各轮"
                          "追加轮次记录（主题/命中/政策过滤/判定分布），只追加绝不改写")
+    ap.add_argument("--research-profile", default="",
+                    help="v5.3.0 持久研究档案：JSON 路径（preset/source_policy/"
+                         "export 三键作默认值注入，显式 CLI 旗标优先；未知键注记"
+                         "忽略）——跨会话研究偏好，绝不改判定语义")
     ap.add_argument("--demo", action="store_true",
                     help="v4.5.0 零门槛体验：用内置样例清单（8 条含 3 处预埋伪造）跑完整判定流程")
     ap.add_argument("--claims", help="内联 JSON 引用数组（同 --refs 的 schema）")
@@ -5230,6 +5282,13 @@ def main() -> int:
                     help="显式 HTTP(S) 代理地址（如 http://127.0.0.1:7890）；"
                           "不指定时自动遵循 HTTP_PROXY/HTTPS_PROXY 环境变量")
     args = ap.parse_args()
+    if getattr(args, "research_profile", ""):  # v5.3.0 F33 档案默认值（显式旗标优先）
+        _profile_applied = apply_research_profile(args.research_profile, args)
+        if _profile_applied is None:
+            return 2  # 硬错误已打印
+        if _profile_applied:
+            print(f"[profile] 研究档案已应用（{os.path.basename(args.research_profile)}）："
+                  + "；".join(_profile_applied) + "——显式旗标优先，判定语义不变")
     if getattr(args, "preset", "") == "submission":  # v3.12 投稿终检预设:组合旗标不改判定语义
         args.strict = True
         args.export = args.export or "gbt7714,bibtex,csv"

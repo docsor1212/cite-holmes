@@ -215,3 +215,9 @@ PLAN 阶段：agent 起草 `plan.json`（subquestions + budget_searches + CALIBR
 风格报告（P0 编造嫌疑/P1 高风险/P2 复核+行动清单）。P0 必须处理；P1 的
 不可达≠不存在（换网络复核）；本报告是机械层口径——「来源是否支撑论断」
 仍需人工语义判断。
+
+## Q: Zotero 导出的一整个文件夹能一次核验吗？上一轮没验完的怎么续？（v5.5.0）
+能：`--refs-dir ~/Zotero/导出/` 把目录下全部 .json/.bib/.md 一次装载进同一
+核验批（坏文件跳过并警告）。续轮：上一轮报告跑 `--next-round report.json`
+生成未决条目重验骨架（partial/unreachable/unverified；invalid 不回收），
+修订后作 `--refs` 输入重跑。两件都不改判定语义。

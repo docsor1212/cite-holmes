@@ -222,6 +222,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v5.5.0** — arXiv title-alias guard (truncated/reordered titles land partial with the registered-title suggestion, never a false invalid; fabrications still die); `--refs-dir` local-library batch; `--next-round` retry skeleton from unresolved entries; 5-minute onboarding doc; placeholder examples replaced with real public data.
+
 **v5.4.0** — review & audit: `--reviewer` (checklist embedded into the report), `--audit-mode` (P0/P1/P2 audit report for editors/reviewers/teachers), MCP backend wiring example. Zero verdict-semantics change.
 
 **v5.3.0** — public eval methodology: one-command reproducible held-out metrics (tools/run_eval.py + docs/benchmark.md with real numbers and honesty boundaries); `--research-profile` persistent preference defaults (explicit flags win, never verdicts).

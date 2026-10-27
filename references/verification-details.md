@@ -288,3 +288,23 @@ Kana（日文）/ Hangul（韩文）。声称题名与注册库登记题名**主
   编辑/审稿人/教师场景；机械层口径，只重组既有判定与线索，绝不新造判定。
 - **MCP 后端形态**：mcp/README.md 含「作为任何 Deep Research agent 的
   核验后端」接线示例（verify_references 进研究循环、invalid 触发重搜）。
+
+## 本地文献库与下一轮种子（v5.5.0：--refs-dir / --next-round）
+
+- **`--refs-dir DIR`**：目录（或单文件）下全部 .json/.bib/.md 按文件名排序一次
+  装载进同一核验批；README* 跳过；坏文件警告跳过（批量韧性），全零才失败。
+  Zotero/JabRef 导出目录即扫即验。
+- **`--next-round report.json`**：从核验 JSON 提取未决条目
+  （partial/unreachable/unverified；**invalid 不回收**——终局判定不重撞）
+  生成 `<stem>_next_round.json` 重验骨架（`refs` 数组 + `_retry_reason` 供人读，
+  引擎忽略未知键）。零网络，判定原样透出，骨架是输入不是结论。
+
+## arXiv 标题别名守卫（v5.5.0 整合，判定语义修订点）
+
+`arxiv_metadata_match` 在相似度 <0.50 的判死分支前新增别名检查：用户题名
+实词（≥2 个；拉丁按词、CJK 按字符——中文无分隔符，停用字表「的与和及对在中」
+独立维护）**全部**出现在登记题名中 → 判
+「截短/异序别名」partial（转人工+登记全称建议），而非 invalid。
+反伪造面不变：编造引用（ID 指向完全无关论文）与登记题名词集交集低，仍走
+invalid。dogfood 实证：STOP(0.42)/Neutropenia/Transaminitis 等 4 例截短题名
+此前被误判 invalid——真文献×不精确题名 ≠ 编造。

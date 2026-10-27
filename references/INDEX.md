@@ -17,6 +17,7 @@
 | 你要做什么 | 直接去 | 一行起步 |
 |---|---|---|
 | 快速核验一份引用清单 | 本页即可 | `python scripts/verify_refs.py --refs refs.json --out r.md` |
+| 新用户第一次用 | docs/onboarding.md（5 分钟三级路径） | `python scripts/verify_refs.py --demo` |
 | 投稿前最终把关 | faq.md「投稿前终检」 | `--preset submission` |
 | 看懂某条为什么这个判定 | verification-details.md + faq.md「--explain」 | `--explain 3` |
 | 医学/临床问题 | medical-mode.md | `--profile medical --easy` |

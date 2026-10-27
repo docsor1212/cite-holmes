@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "5.4.0"
+VERSION = "5.5.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -1398,6 +1398,34 @@ def render_audit_report(results: list, cd, scorecard: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def build_next_round(report: dict, out_path: str):
+    """v5.5.0 F41 下一轮种子：从核验 JSON 报告提取未决条目生成重验骨架。
+    收录 partial/unreachable/unverified（invalid 是终局判定不回收——死路不再
+    撞）；每条带 _retry_reason（原注记截断）与原标识符，判定字段绝不写入
+    （骨架是输入不是结论）。返回 (out_path, n)。硬失败 raise ValueError。"""
+    results = report.get("results") if isinstance(report, dict) else None
+    if not isinstance(results, list):
+        raise ValueError("报告缺 results 数组——请提供本工具生成的完整 JSON")
+    keep = []
+    for r in results:
+        if not isinstance(r, dict) or r.get("verdict") not in (
+                "partial", "unreachable", "unverified"):
+            continue
+        ref = {k: r.get(k) for k in ("title", "url", "doi", "pmid", "arxiv",
+                                     "source", "year") if r.get(k)}
+        if not ref:
+            continue
+        ref["_retry_reason"] = re.sub(r"\s+", " ", str(r.get("note") or ""))[:120]
+        keep.append(ref)
+    skeleton = {"_comment": ("cite-holmes 下一轮重验骨架（v%s 生成）：按需修订"
+                             "字段后作为 --refs 输入重跑；_retry_reason 仅供人读，"
+                             "引擎忽略未知键" % VERSION),
+                "refs": keep}
+    with open(out_path, "w", encoding="utf-8") as f:
+        json.dump(skeleton, f, ensure_ascii=False, indent=2)
+    return out_path, len(keep)
+
+
 def _trace_append(path: str, mode: str, fields: dict) -> None:
     """v5.2.0 F31 研究底稿（append-only 审计链）：discover/verify 各轮追加
     轮次记录。只追加绝不改写；写失败静默（底稿是增强产物，绝不阻断主流程）。"""
@@ -1938,6 +1966,28 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
         return "partial", (f"跨语言标题无法机器比对（相似度 {sim:.2f} 不作编造依据）"
                            "→ 建议人工核对"), True
     if sim < 0.50:
+        # v5.5.0 标题别名守卫（整合并行会话 2026-10-26 补丁并经门审：截短/异序题名
+        # 累计 4 次误判 invalid——STOP(0.42)、Neutropenia、Transaminitis、两篇综述同型。
+        # 用户题名实词若全部出现在登记题名中，判「别名/截短」→ partial + 登记全称
+        # 建议，而非 invalid。编造引用（ID 指向完全无关论文）词集不相交，仍走
+        # invalid，不放开伪造口子。评审修订：CJK 无分隔符不能按词切——改字符级
+        # 子集（去 CJK 停用字；≥2 词/字联合门不变）。
+        def _lat(s):
+            return {t for t in re.sub(r"[^0-9a-z]+", " ", (s or "").lower()).split()
+                    if t not in ("a", "an", "the", "of", "for", "and", "on",
+                                 "in", "to", "with")}
+
+        def _cjk(s):
+            return {c for c in (s or "")
+                    if "\u4e00" <= c <= "\u9fff" and c not in "的与和及对在中"}
+
+        _u_lat, _u_cjk = _lat(title), _cjk(title)
+        _r_lat, _r_cjk = _lat(meta_title), _cjk(meta_title)
+        if (len(_u_lat) + len(_u_cjk) >= 2
+                and _u_lat <= _r_lat and _u_cjk <= _r_cjk):
+            return "partial", (f"arXiv 标题疑似截短/异序（相似度 {sim:.2f}，但用户题名"
+                               f"实词全部包含于登记题名）→ 建议引用登记全称："
+                               f"《{meta_title[:80]}》"), True
         return "invalid", (f"arXiv 元数据标题相似度仅 {sim:.2f} → ID 指向的不是这篇论文，"
                            f"疑似编造或错引（arXiv 实际为《{meta_title[:60]}》）"), True
     year_note = ""
@@ -3144,8 +3194,13 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
         out["note"] = (out["note"] + "；" if out["note"] else "") + "；".join(why)
 
     # v1.4：元数据核验判为 partial 时，verified 降级为 partial
+    # v5.5.0 审计 P1-1：arXiv partial（含 0.50-0.82 近似与别名守卫道）一律挂
+    # 转人工旗——verification-details 承诺「转人工」，旗必须真挂（v4.1.0 P3-1
+    # 自立红线：注记说转人工的旗不得缺席），复核漏斗才不漏计
     if (doi_adj == "partial" or arxiv_adj == "partial") and out["verdict"] == "verified":
         out["verdict"] = "partial"
+    if arxiv_adj == "partial" and out["verdict"] == "partial":
+        out["needs_human_check"] = True
     # v3.4 外部独测合并:PMID 元数据 partial 与 DOI/arXiv 同闸——降级不得被终局覆盖
     if (out.get("checks", {}).get("pmid_metadata", {}) or {}).get("adjust") == "partial" \
             and not (out.get("checks", {}).get("pmid_metadata", {}) or {}).get(
@@ -5265,6 +5320,16 @@ def main() -> int:
                     help="v5.4.0 稿件审计：面向编辑/审稿人/教师输出审计风格报告"
                          "（<out>.audit.md——疑点按 P0 编造嫌疑/P1 高风险线索/P2 "
                          "复核项分级+行动清单；机械层口径，非语义判断）")
+    ap.add_argument("--refs-dir", default="",
+                    help="v5.5.0 本地文献库批量：目录下全部 .json/.bib/.md 引用文件"
+                         "一次装载进同一核验批（按文件名排序；坏文件跳过并警告，"
+                         "全零才失败）——Zotero/JabRef 导出目录即扫即验")
+    ap.add_argument("--next-round", dest="next_round", metavar="REPORT_JSON",
+                    default="",
+                    help="v5.5.0 下一轮种子：从 JSON 报告提取未决条目"
+                         "（partial/unreachable/unverified——invalid 不回收）生成"
+                         "可编辑的重验骨架 <stem>_next_round.json（零网络，判定"
+                         "原样透出）——把研究缺口变成下一轮输入")
     ap.add_argument("--demo", action="store_true",
                     help="v4.5.0 零门槛体验：用内置样例清单（8 条含 3 处预埋伪造）跑完整判定流程")
     ap.add_argument("--claims", help="内联 JSON 引用数组（同 --refs 的 schema）")
@@ -5430,6 +5495,24 @@ def main() -> int:
         print(f"[grill] 对抗审查问题单：{len(items)} 条引用 · {n_q} 个挑战问题 → {out}")
         print("[grill] 判定不变（自查工具）；逐条作答后再投稿。")
         return 0
+    if getattr(args, "next_round", ""):  # v5.5.0 F41 下一轮种子（零网络，独立退出）
+        _nr_path = os.path.expanduser(args.next_round)
+        if not os.path.isfile(_nr_path):
+            print(f"❌ 报告文件不存在：{_nr_path}（--next-round 需要一次核验的 JSON 报告）",
+                  file=sys.stderr)
+            return 2
+        try:
+            with open(_nr_path, encoding="utf-8") as f:
+                _nr_doc = json.load(f)
+            _nr_out = (_nr_path.rsplit(".", 1)[0] if "." in _nr_path
+                       else _nr_path) + "_next_round.json"
+            _nr_out, _nr_n = build_next_round(_nr_doc, _nr_out)
+        except (ValueError, OSError) as e:
+            print(f"❌ 下一轮种子生成失败：{e}", file=sys.stderr)
+            return 2
+        print(f"[next-round] 重验骨架：{_nr_out}（{_nr_n} 条未决："
+              "partial/unreachable/unverified；invalid 不回收）——修订后作 --refs 输入")
+        return 0
     if getattr(args, "doctor", False):
         return run_doctor(net=getattr(args, "net", False),
                           timeout=min(args.timeout, 8.0),
@@ -5525,6 +5608,36 @@ def main() -> int:
         refs = parse_markdown_refs(_doctext)
         if refs:
             print(f"[one-file] 自文档参考文献节提取 {len(refs)} 条（GB/T/Vancouver）")
+    if (getattr(args, "refs_dir", "") and not refs
+            and not args.refs and not args.claims):  # v5.5.0 审计 P2-3：互斥序对齐 discover/check_document
+        import glob as _glob
+        _rd = os.path.expanduser(args.refs_dir)
+        if os.path.isfile(_rd):
+            _files = [_rd]
+        elif os.path.isdir(_rd):
+            _files = sorted(p for ext in ("*.json", "*.bib", "*.md")
+                            for p in _glob.glob(os.path.join(_rd, ext))
+                            if not os.path.basename(p).startswith("README"))
+        else:
+            print(f"❌ --refs-dir 路径不存在：{_rd}", file=sys.stderr)
+            return 2
+        if not _files:
+            print(f"❌ {_rd} 下没有 .json/.bib/.md 引用文件", file=sys.stderr)
+            return 2
+        refs = []
+        for _fp in _files:
+            try:
+                _part = load_refs_file(_fp)
+            except (OSError, ValueError) as e:
+                print(f"[refs-dir] 跳过 {_fp}（{type(e).__name__}）", file=sys.stderr)
+                continue
+            if _part:
+                refs.extend(_part)
+                print(f"[refs-dir] {_fp}: {len(_part)} 条")
+        if not refs:
+            print("❌ 文献库批量装载为 0 条（全部文件空或无参考文献节）", file=sys.stderr)
+            return 2
+        print(f"[refs-dir] 批量装载 {len(refs)} 条（来自 {len(_files)} 个文件）——进入核验栈")
     if not args.refs and not args.claims and not refs:
         print("❌ 需要 --refs 或 --claims 之一；--check-document 指向含「参考文献」节"
               "的文档（v4.4.0 单文件模式）；--discover 主题检索（v4.5.0 文献发现）；"

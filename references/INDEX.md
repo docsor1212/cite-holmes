@@ -26,6 +26,7 @@
 | 查文献做综述 | SKILL「综述工作台」+ anti-patterns#16 | `--discover "主题" --review-kit` |
 | 深度研究过程治理 | SKILL「深度研究控制」+ verification-details | `--plan plan.json --preset deep --trace trace.md` |
 | 复现评测数字/建持久偏好 | docs/benchmark.md + faq.md「研究档案」 | `python tools/run_eval.py` / `--research-profile p.json` |
+| 稿件引用筛查（编辑/教师） | faq.md「audit-mode」+ verification-details | `--check-document 稿.md --audit-mode` |
 | 弱网/国内网络 | faq.md「国内网络」 | `--cn` 或 `--proxy` |
 | 遇到疑似误用 | anti-patterns.md | 通读一遍（每条带替代方案） |
 | 统一用词/报告语言对齐 | GLOSSARY.md | 正词表（五态/信号/错误码），带 Avoid 列表 |

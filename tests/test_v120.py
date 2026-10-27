@@ -57,7 +57,7 @@ class TestV120(unittest.TestCase):
         return rc, calls, doc
 
     def test_version_bumped_120(self):
-        self.assertEqual(vr.VERSION, "5.3.0")
+        self.assertEqual(vr.VERSION, "5.4.0")
 
     def test_disk_cache_hit_second_run_zero_calls(self):
         refs = [{"title": "A Paper About X", "doi": "10.1000/cache-hit"}]
@@ -224,7 +224,7 @@ class TestV120Guardrails(unittest.TestCase):
         # 数据治理固化）+ build_retraction_cache.py（RWDB 官方 dump → 本地
         # 撤稿索引一键构建，--retraction-cache 配套）均为公开价值工具；
         # 守卫语义不变：白名单外文件即失败，私有工具仍进不来
-        # v5.3.0 扩容：run_eval.py（留出集评测公开口径 runner，随包分发）
+        # v5.3.0 再扩容：run_eval.py（留出集评测公开口径 runner，随包分发）
         self.assertEqual(present, {"agentskills_check.py", "check_ta_table.py",
                                    "build_retraction_cache.py", "run_eval.py"},
                          "tools/ 只应保留白名单公开工具")

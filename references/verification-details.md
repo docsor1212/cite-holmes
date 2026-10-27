@@ -276,3 +276,15 @@ Kana（日文）/ Hangul（韩文）。声称题名与注册库登记题名**主
   判定分布；`--refs your_labeled.json` 自备标注集（expected: planted/clean）、
   `--net` 在线口径。方法论与最新数字：`docs/benchmark.md`（数字可复现，
   在线口径只对当日快照负责）。
+
+
+## 审查与审计（v5.4.0：--reviewer / --audit-mode）
+
+- **`--reviewer`**：核验报告尾部追加审稿人预演问题单（--grill 同款生成器
+  就地嵌入，免二跳）；判定不变。
+- **`--audit-mode`**：输出 `<out>.audit.md` 稿件审计报告——疑点三级分层
+  （P0 编造嫌疑=invalid / P1 高风险=撤稿·不可达 / P2 复核=政策注记·partial
+  缺字段）+完整性（--check-document 时含覆盖率/孤儿）+行动清单。面向
+  编辑/审稿人/教师场景；机械层口径，只重组既有判定与线索，绝不新造判定。
+- **MCP 后端形态**：mcp/README.md 含「作为任何 Deep Research agent 的
+  核验后端」接线示例（verify_references 进研究循环、invalid 触发重搜）。

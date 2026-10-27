@@ -222,6 +222,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v5.4.0** — review & audit: `--reviewer` (checklist embedded into the report), `--audit-mode` (P0/P1/P2 audit report for editors/reviewers/teachers), MCP backend wiring example. Zero verdict-semantics change.
+
 **v5.3.0** — public eval methodology: one-command reproducible held-out metrics (tools/run_eval.py + docs/benchmark.md with real numbers and honesty boundaries); `--research-profile` persistent preference defaults (explicit flags win, never verdicts).
 
 **v5.2.0** — deep-research workflow controls: `--plan` plan artifact (validated & rendered, never auto-edited), `--preset deep` budget tier, `--source-policy journal_only,deny-domain=x.com` (curation at discovery, annotation at verify - never verdicts), `--trace` append-only research ledger. Zero verdict-semantics change.

@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "5.3.0"
+VERSION = "5.4.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -1327,6 +1327,75 @@ def apply_research_profile(path: str, args):
         args.export = ev
         applied.append(f"export={ev}")
     return applied
+
+
+def render_audit_report(results: list, cd, scorecard: dict) -> str:
+    """v5.4.0 F35 稿件审计报告（面向编辑/审稿人/教师）：把核验结果重组为
+    分级疑点清单——P0 编造嫌疑（invalid）/P1 高风险线索（撤稿/不可达）/
+    P2 复核项（政策注记/partial 缺字段）+完整性（覆盖率/孤儿，如有）+
+    行动清单。机械层口径：只重组既有判定与线索，绝不新造判定（ADR-0005）。"""
+    lines = ["# 引用审计报告（audit）", "",
+             f"- 生成：{time.strftime('%Y-%m-%d %H:%M')} · cite-holmes v{VERSION}"
+             " · 机械层口径（非语义判断）",
+             f"- 对象：{len(results)} 条引用 · CiteScore {scorecard['score']}/100"
+             f"（{scorecard['grade']} 级）", ""]
+    p0 = [r for r in results if r["verdict"] == "invalid"]
+    if p0:
+        lines.append(f"### P0 编造嫌疑（{len(p0)} 条，最高优先）\n")
+        for r in p0:
+            codes = "、".join(r.get("error_codes") or []) or "—"
+            lines.append(f"- #{r['index']} {md_cell(r.get('title'), 60)}"
+                         f"（错误码 {codes}）：{md_cell(r.get('note'), 110)}")
+        lines.extend(["", "**建议动作**：逐条移除或替换信源；若作者坚持存在，"
+                      "要求提供可访问的原始出处。", ""])
+    def _is_retr(r):
+        # 审计 P1-1 修复：撤稿信号在嵌套 checks.retraction.retracted（引擎从不在
+        # 顶层设 retracted 键——旧判据读顶层是死键，真实撤稿条目全漏进 P2）
+        return bool(((r.get("checks") or {}).get("retraction") or {}).get("retracted"))
+
+    _p0_ids = {id(r) for r in p0}
+    retr = [r for r in results if _is_retr(r) and id(r) not in _p0_ids]
+    unreach = [r for r in results
+               if r["verdict"] == "unreachable" and id(r) not in _p0_ids
+               and not _is_retr(r)]  # 审计 P1-2：与 retr 互斥，防同条双计
+    p1 = retr + unreach
+    if p1:
+        lines.append(f"### P1 高风险线索（{len(p1)} 条）\n")
+        for r in p1:
+            tag = "撤稿⚠" if _is_retr(r) else "不可达"
+            lines.append(f"- #{r['index']} [{tag}] {md_cell(r.get('title'), 60)}："
+                         f"{md_cell(r.get('note'), 110)}")
+        lines.extend(["", "**建议动作**：要求作者提供可访问版本（撤稿条目必须"
+                      "处理；不可达≠不存在，换网络/代理复核后再定）。", ""])
+    _p1_ids = {id(r) for r in p1}
+    p2 = [r for r in results
+          if id(r) not in _p1_ids and r["verdict"] != "invalid"
+          and ((r.get("checks", {}) or {}).get("source_policy")
+               or r["verdict"] == "partial")]
+    if p2:
+        lines.append(f"### P2 复核项（{len(p2)} 条）\n")
+        for r in p2:
+            pol = (r.get("checks", {}) or {}).get("source_policy") or {}
+            tag = "政策" if pol else "partial"
+            lines.append(f"- #{r['index']} [{tag}] {md_cell(r.get('title'), 60)}："
+                         f"{md_cell(r.get('note'), 110)}")
+        lines.extend(["", "**建议动作**：按注记人工过目；政策注记反映策展偏好"
+                      "（非真伪）。", ""])
+    if cd is not None:
+        lines.extend(["### 完整性", "",
+                      f"- 正文 in-text 引用 {cd['n_citations']} 处：未绑定 "
+                      f"{cd['n_unbound']}、锚词不足 {cd['n_low_anchor']}",
+                      f"- 引用覆盖率 {cd.get('coverage', 0):.0%}"
+                      + (f"（{cd.get('n_uncited')} 条列而未引——漏引或冗列）"
+                         if cd.get("n_uncited") else ""), ""])
+    lines += ["## 行动清单", "",
+              f"1. P0 {len(p0)} 条：移除/替换或索要原始出处",
+              f"2. P1 {len(p1)} 条：撤稿必处理；不可达复核后再定",
+              f"3. P2 {len(p2)} 条：人工过目",
+              "4. 完整性问题（如有）：补引或删冗", "",
+              "---", "免责：本报告为机械层核验重组（存在性/一致性/结构），"
+              "「来源是否支撑论断」属语义层，不在本报告范围。"]
+    return "\n".join(lines) + "\n"
 
 
 def _trace_append(path: str, mode: str, fields: dict) -> None:
@@ -5189,6 +5258,13 @@ def main() -> int:
                     help="v5.3.0 持久研究档案：JSON 路径（preset/source_policy/"
                          "export 三键作默认值注入，显式 CLI 旗标优先；未知键注记"
                          "忽略）——跨会话研究偏好，绝不改判定语义")
+    ap.add_argument("--reviewer", action="store_true",
+                    help="v5.4.0 审稿人预演嵌入：核验报告尾部自动追加对抗审查"
+                         "问题单（--grill 的同款生成器就地嵌入，免二跳；判定不变）")
+    ap.add_argument("--audit-mode", action="store_true",
+                    help="v5.4.0 稿件审计：面向编辑/审稿人/教师输出审计风格报告"
+                         "（<out>.audit.md——疑点按 P0 编造嫌疑/P1 高风险线索/P2 "
+                         "复核项分级+行动清单；机械层口径，非语义判断）")
     ap.add_argument("--demo", action="store_true",
                     help="v4.5.0 零门槛体验：用内置样例清单（8 条含 3 处预埋伪造）跑完整判定流程")
     ap.add_argument("--claims", help="内联 JSON 引用数组（同 --refs 的 schema）")
@@ -5711,6 +5787,19 @@ def main() -> int:
         _n_kit = sum(1 for _ln in _kit.splitlines() if re.match(r"\[\d+\] ", _ln))
         print(f"综述工作台：{_kit_path}（综述表格/标注书目/即贴 GB/T 参考文献表 "
               f"{_n_kit} 条）")
+
+    if getattr(args, "reviewer", False):  # v5.4.0 F34：审稿人预演就地嵌入（免二跳）
+        _items = grill_report(results)
+        with open(args.out, "a", encoding="utf-8") as f:
+            f.write("\n\n---\n\n" + render_grill_md(_items, scorecard))
+        print(f"[reviewer] 审稿人预演问题单已嵌入报告尾部"
+              f"（{sum(len(x['questions']) for x in _items)} 个挑战；判定不变）")
+    if getattr(args, "audit_mode", False):  # v5.4.0 F35：稿件审计报告
+        _audit_path = (args.out.rsplit(".", 1)[0]
+                       if "." in args.out else args.out) + ".audit.md"
+        with open(_audit_path, "w", encoding="utf-8") as f:
+            f.write(render_audit_report(results, cd, scorecard))
+        print(f"稿件审计：{_audit_path}（P0 编造嫌疑/P1 高风险/P2 复核 分级+行动清单）")
 
     bad = [r for r in results if r["verdict"] in ("unreachable", "invalid")]
     print(f"\n报告：{args.out}\nJSON：{json_path}")

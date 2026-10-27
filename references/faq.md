@@ -208,3 +208,10 @@ PLAN 阶段：agent 起草 `plan.json`（subquestions + budget_searches + CALIBR
 `python tools/run_eval.py` 一条命令复现内置金标口径（捕获/实锤/误伤/分布），
 方法论与诚实边界见 `docs/benchmark.md`——离线口径只测结构层，在线数字只对
 当日快照负责。
+
+
+## Q: 编辑/教师怎么快速筛查一份稿件的引用？（v5.4.0）
+`--check-document 稿件.md --audit-mode`：参考文献自动提取+全量核验+审计
+风格报告（P0 编造嫌疑/P1 高风险/P2 复核+行动清单）。P0 必须处理；P1 的
+不可达≠不存在（换网络复核）；本报告是机械层口径——「来源是否支撑论断」
+仍需人工语义判断。

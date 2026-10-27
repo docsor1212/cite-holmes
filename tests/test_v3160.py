@@ -45,8 +45,8 @@ class TestCardFirstLine(unittest.TestCase):
         self.assertIn("深度研究·学术研究｜引用核查×AI幻觉检测", zh)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "5.3.0")
-        self.assertIn("version: 5.3.0",
+        self.assertEqual(vr.VERSION, "5.4.0")
+        self.assertIn("version: 5.4.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
 

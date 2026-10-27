@@ -107,3 +107,19 @@ mcp/
 ```
 
 License: MIT. Author: SorSor. Repo: https://github.com/docsor1212/cite-holmes
+
+
+## 作为任何 Deep Research agent 的核验后端（v5.4.0）
+
+AI 研究工具生成的引用普遍不经注册库核验（业界实测错引率高企，核查责任
+目前落在使用者身上）。本 MCP 让任何会调工具的深度研究 agent——Claude Code、
+Codex、Cursor、自研 LangGraph/OpenClaw agent——零成本获得注册库级核验：
+
+- `verify_references`：研究循环每收集一批引用就过一次五态判定（verified /
+  partial / unreachable / invalid / unverified），invalid 立即触发重搜；
+- `explain_verdict`：agent 对判定拿不准时取判定链人话解释；
+- `check_document`：报告成稿后做全文上下文核验（in-text 绑定+锚词率）。
+
+推荐接线：在研究 agent 的 VERIFY 步骤后追加一次 `verify_references` 调用，
+把 unverified/partial 条目排除出结论区（「未验证引用绝不进结论」自此有
+机械兜底）。批量上限 50 条/次，超出请分批。

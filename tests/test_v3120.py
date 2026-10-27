@@ -178,7 +178,7 @@ class TestDocsUsability(unittest.TestCase):
         self.assertEqual(len(vr._ERR_CODE_ZH), 12)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "5.3.0")
+        self.assertEqual(vr.VERSION, "5.4.0")
 
 
 if __name__ == "__main__":

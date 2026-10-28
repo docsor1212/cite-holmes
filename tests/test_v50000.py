@@ -154,8 +154,8 @@ class F26_Docs(unittest.TestCase):
     def test_skill_capability_row_and_budget(self):
         en = open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read()
         zh = open(os.path.join(SK, "SKILL_ZH.md"), encoding="utf-8").read()
-        self.assertIn("Scholarly usage (citation contexts)", en)
-        self.assertIn("学界用法（引文语境）", zh)
+        self.assertIn("Scholarly usage & open access", en)  # v5.6 行题扩展
+        self.assertIn("学界用法与开放获取", zh)  # v5.6 行题扩展
         self.assertLessEqual(len(en.splitlines()), 222, "EN 行预算")
         self.assertLessEqual(len(zh.splitlines()), 202, "ZH 行预算")
 

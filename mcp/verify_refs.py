@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "5.5.0"
+VERSION = "5.6.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -1396,6 +1396,46 @@ def render_audit_report(results: list, cd, scorecard: dict) -> str:
               "---", "免责：本报告为机械层核验重组（存在性/一致性/结构），"
               "「来源是否支撑论断」属语义层，不在本报告范围。"]
     return "\n".join(lines) + "\n"
+
+
+def unpaywall_lookup(doi: str, mailto: str, timeout: float) -> dict:
+    """v5.6.0 开放获取查询（Unpaywall 官方 API，mailto 礼貌标识必配）。
+    返回 {}（失败/未收录——静默，绝不参与判定）或
+    {"is_oa": bool, "license": str, "oa_url": str}。纯数据富集：只回答
+    「这篇有没有免费全文、什么许可」，是综述工作流的选读信号。"""
+    url = ("https://api.unpaywall.org/v2/" + quote(doi, safe="")
+           + "?email=" + quote(mailto or "", safe=""))
+    if _cb_open(url):
+        return {}
+    try:
+        req = urllib.request.Request(
+            url, headers={"User-Agent": f"cite-holmes/{VERSION}; +verified-deep-research"})
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            _cb_record(url, False)
+            j = json.loads(resp.read().decode("utf-8", "ignore")) or {}
+    except urllib.error.HTTPError:
+        _cb_record(url, False, degrade=False)  # 404=未收录，站点有响应
+        return {}
+    except Exception:
+        _cb_record(url, True)
+        return {}
+    if not j.get("is_oa"):
+        return {"is_oa": False}
+    best = j.get("best_oa_location") or {}
+    return {"is_oa": True,
+            "license": str(best.get("license") or "")[:24],
+            "oa_url": str(best.get("url") or "")[:160]}
+
+
+def _open_access_enrich(out: dict, timeout: float) -> None:
+    """v5.6.0 OA 接线 helper：verified+DOI+mailto 三门齐全才查 Unpaywall，
+    结果写 checks.open_access（纯数据富集，判定永不改——ADR-0005）。"""
+    if (not _OPTS.get("mailto") or not out.get("doi")
+            or not DOI_RE.match(out["doi"]) or out["verdict"] != "verified"):
+        return
+    oa = unpaywall_lookup(out["doi"], _OPTS["mailto"], timeout)
+    if oa:
+        out["checks"]["open_access"] = dict(oa, ran=True)
 
 
 def build_next_round(report: dict, out_path: str):
@@ -2815,7 +2855,18 @@ def parse_markdown_refs(text: str) -> list:
     return refs
 
 
-def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool = False) -> dict:
+def verify_one(ref: dict, idx: int, offline: bool, timeout: float,
+               medical: bool = False) -> dict:
+    """verify_one 对外入口（v5.6.0 拆分：核心 _verify_one_impl + 统一后处理）。
+    OA 富集在 wrapper 统一接线——四条提前 return 的 verified 路径
+    （PMID 反查/卷期页锚定/OpenAlex 找锚/着陆页救回）与主路径一样被覆盖。"""
+    out = _verify_one_impl(ref, idx, offline, timeout, medical)
+    if not offline:
+        _open_access_enrich(out, timeout)
+    return out
+
+
+def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical: bool = False) -> dict:
     def _s(v):
         return str(v) if v is not None else ""
 
@@ -3087,6 +3138,17 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
                            note=(out["note"] + "；" if out["note"] else "") +
                                 "arXiv 官方站对该 ID 返回 404（官方库查无）→ 疑似编造引用")
                 return out
+            # v5.6.0 审计修复（T2 实战回归）：PubMed 落地页对不存在 PMID 开始返回
+            # 真 404——unreachable 提前 return 不得屏蔽 E-utilities 权威存在性判定
+            # （假 PMID 落地页 404 → 仍须判 invalid）。pubmed_pmid_exists 自身契约
+            # fail-safe：传输失败按可达处理（True），只有注册库确凿查无才 False。
+            m_pm = PUBMED_URL_RE.match(url)
+            if m_pm:
+                pmid_ok, pmid_note = pubmed_pmid_exists(m_pm.group(1), timeout)
+                if not pmid_ok:
+                    out.update(verdict="invalid", needs_human_check=True,
+                               note=(out["note"] + "；" if out["note"] else "") + pmid_note)
+                    return out
             out.update(verdict="unreachable", needs_human_check=True,
                        note=(out["note"] + "；" if out["note"] else "") + "可能反爬/临时故障，不等于不存在")
             # v1.5 存档兜底：不可达 ≠ 不存在，附 Wayback 存档链给人工复核做对照
@@ -3201,6 +3263,7 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool
         out["verdict"] = "partial"
     if arxiv_adj == "partial" and out["verdict"] == "partial":
         out["needs_human_check"] = True
+
     # v3.4 外部独测合并:PMID 元数据 partial 与 DOI/arXiv 同闸——降级不得被终局覆盖
     if (out.get("checks", {}).get("pmid_metadata", {}) or {}).get("adjust") == "partial" \
             and not (out.get("checks", {}).get("pmid_metadata", {}) or {}).get(
@@ -4516,6 +4579,13 @@ def build_review_kit(results: list, refs: list = None, topic: str = "",
         _ul = usage_line(r.get("citation_contexts"))
         if _ul:
             out.append(f"  - 学界用法（≤3 条抽样）：{_ul}")  # 审计 P3-2：kit 无区级免责，就地声明
+        _oa = (r.get("checks") or {}).get("open_access") or {}
+        if _oa.get("ran"):
+            if _oa.get("is_oa"):
+                out.append(f"  - 开放获取：{_oa.get('license') or '许可未知'}"
+                           + (f" · {_oa['oa_url']}" if _oa.get("oa_url") else ""))
+            else:
+                out.append("  - 开放获取：无免费全文（Unpaywall 未收录 OA 版本）")
     out.append("")
 
     out.append("## 三、即贴参考文献表（GB/T 7714-2025，宁缺毋错：仅收 verified"
@@ -4711,7 +4781,18 @@ def render_md(results: list, offline: bool, profile: str = "general",
         f"⚠️unreachable {c['unreachable']} · ❌invalid {c['invalid']} · ⏸unverified {c['unverified']}",
         "- 计分：verified +10 / partial +4 / unreachable 0 / unverified −2 / invalid −8，"
         "满分 = 10 × 条数，归一化 0-100",
-        "",
+    ]
+    _oa_ran = [r for r in results
+               if ((r.get("checks") or {}).get("open_access") or {}).get("ran")]
+    if _oa_ran:
+        _n_oa = sum(1 for r in _oa_ran
+                    if r["checks"]["open_access"].get("is_oa"))
+        lines.append(f"- 开放获取：{_n_oa}/{len(_oa_ran)} 条可免费读取"
+                     "（Unpaywall；--mailto 启用查询——纯数据富集不改判定）")
+        lines.append("")
+    else:  # 审计 P1-1：无 OA 路径保持与 v5.4 逐字节一致（无条件空行不丢）
+        lines.append("")
+    lines += [
         "| # | 标题 | 层级 | HTTP | 判定 | 说明 |",
         "|---|---|---|---|---|---|",
     ]
@@ -4911,6 +4992,35 @@ def render_html(results: list, offline: bool, profile: str = "general",
     else:
         sem_html = ""
 
+    # v5.6.0 HTML 学界用法节（对齐 md 层；无数据整段不渲染——老输出不变）
+    usage_rows_h = [r for r in results if usage_line(r.get("citation_contexts"))]
+    if usage_rows_h:
+        _trs = "".join(
+            f"<tr><td>{r['index']}</td>"
+            f"<td>{e(str((r.get('citation_contexts') or {}).get('cited_by', '—')))}</td>"
+            f"<td>{e(usage_line(r.get('citation_contexts')))}</td></tr>"
+            for r in usage_rows_h)
+        usage_html = (f"<h2>学界用法（引文语境）</h2>"
+                      f"<p class='meta'>后续文献如何使用该论文——语境是增强信号，"
+                      f"绝不改变判定；覆盖率低属诚实边界。</p>"
+                      f"<table><tr><th>#</th><th>被引</th><th>学界用法</th>"
+                      f"</tr>{_trs}</table>")
+    else:
+        usage_html = ""
+
+    # v5.6.0 审计 P2-3：HTML 侧 OA 汇总行（对齐 md 层；无数据不渲染）
+    _oa_ran_h = [r for r in results
+                 if ((r.get("checks") or {}).get("open_access") or {}).get("ran")]
+    if _oa_ran_h:
+        _n_oa_h = sum(1 for r in _oa_ran_h
+                      if r["checks"]["open_access"].get("is_oa"))
+        _oa_html = (f"<p>开放获取：{_n_oa_h}/{len(_oa_ran_h)} 条可免费读取"
+                    "（Unpaywall；--mailto 启用——纯数据富集不改判定）</p>")
+    else:
+        _oa_html = ""
+    # v5.6.0 审计 P2-1：空占位条件化——旧版（无 usage 节）字节契约保持
+    mid_html = "\n".join(x for x in (sem_html, usage_html) if x) + "\n"
+
     med = ("<p class='disclaim'>⚠️ 免责声明：本报告仅为信源机械核验，不构成证据分级结论"
            "或医疗建议；预印本/社区层来源不得支撑医学结论。</p>") if profile == "medical" else ""
     pcls = "disclaim" if sc["counts"]["invalid"] or sc["counts"]["unreachable"] or sc["counts"]["unverified"] else "preok"
@@ -4988,13 +5098,13 @@ border-top:1px solid #d8d2c4;padding-top:8px}}
 {' · 医学信源预设' if profile == 'medical' else ''}<br>
 总计 {sc['total']} 条：✅verified {c['verified']} · 🟡partial {c['partial']} ·
 ⚠️unreachable {c['unreachable']} · ❌invalid {c['invalid']} · ⏸unverified {c['unverified']}</p>
+{_oa_html}
 {med}
 {pre}
 <table><tr><th>#</th><th>标题</th><th>层级</th><th>HTTP</th><th>判定</th><th>说明</th></tr>
 {''.join(rows)}</table>
 {review_html}
-{sem_html}
-{cap_html}
+{mid_html}{cap_html}
 <h2>判定说明</h2>
 <ul>
 <li><b>verified</b>：可达 + 权威层 + 字段完整——可支撑正文结论</li>

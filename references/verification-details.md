@@ -308,3 +308,15 @@ Kana（日文）/ Hangul（韩文）。声称题名与注册库登记题名**主
 反伪造面不变：编造引用（ID 指向完全无关论文）与登记题名词集交集低，仍走
 invalid。dogfood 实证：STOP(0.42)/Neutropenia/Transaminitis 等 4 例截短题名
 此前被误判 invalid——真文献×不精确题名 ≠ 编造。
+
+
+## 开放获取与 MCP 工具面（v5.6.0）
+
+- **开放获取查询（Unpaywall）**：verified 的 DOI 条目且配置 `--mailto` 时，
+  查 Unpaywall 官方 API 得 is_oa/license/oa_url（`checks.open_access`）。
+  报告头部出「开放获取 X/N 条可免费读取」汇总，综述工作台书目逐条标注。
+  **纯数据富集**：无 mailto/失败/未收录一律静默；绝不参与判定（ADR-0005）。
+  Unpaywall 要求 mailto 礼貌标识——复用 `--mailto`（Crossref polite pool 同源）。
+- **MCP 新工具**：`discover_references`（主题检索双源+出生即核验，深度研究
+  agent 的检索步直连；limit 封顶 25）、`build_review_kit`（results 数组→
+  综述就绪三件套 markdown，零网络）。工具面从 3→5。

@@ -118,7 +118,11 @@ Codex、Cursor、自研 LangGraph/OpenClaw agent——零成本获得注册库�
 - `verify_references`：研究循环每收集一批引用就过一次五态判定（verified /
   partial / unreachable / invalid / unverified），invalid 立即触发重搜；
 - `explain_verdict`：agent 对判定拿不准时取判定链人话解释；
-- `check_document`：报告成稿后做全文上下文核验（in-text 绑定+锚词率）。
+- `check_document`：报告成稿后做全文上下文核验（in-text 绑定+锚词率）；
+- `discover_references`（v5.6.0）：主题检索 PubMed+OpenAlex 并出生即核验——
+  深度研究循环的检索步直接获得带五态判定的候选文献，invalid 立即重搜；
+- `build_review_kit`（v5.6.0）：把核验结果转成综述就绪三件套（对比表/标注
+  书目/即贴 GB/T），零网络。
 
 推荐接线：在研究 agent 的 VERIFY 步骤后追加一次 `verify_references` 调用，
 把 unverified/partial 条目排除出结论区（「未验证引用绝不进结论」自此有

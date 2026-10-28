@@ -221,3 +221,10 @@ PLAN 阶段：agent 起草 `plan.json`（subquestions + budget_searches + CALIBR
 核验批（坏文件跳过并警告）。续轮：上一轮报告跑 `--next-round report.json`
 生成未决条目重验骨架（partial/unreachable/unverified；invalid 不回收），
 修订后作 `--refs` 输入重跑。两件都不改判定语义。
+
+
+## Q: 「开放获取」汇总是怎么来的？会不会影响判定？（v5.6.0）
+配置 `--mailto` 后，verified 的 DOI 条目会查 Unpaywall 官方 API（免费），
+在报告头部给出「X/N 条可免费读取」并在综述工作台逐条标注许可与全文地址
+——帮综述作者优先选能立即读的文献。它只回答「有没有免费全文」，**不影响
+任何判定**；未配 mailto 或查询失败时整段静默。

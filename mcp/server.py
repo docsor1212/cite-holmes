@@ -225,6 +225,44 @@ if _MCP_OK:
         Zero network calls — static explanation layer."""
         return json.dumps(explain_verdict_impl(result), ensure_ascii=False, indent=1)
 
+    @mcp.tool
+    def discover_references(topic: str, limit: int = 8, timeout: float = 20.0,
+                            sort: str = "relevance") -> str:
+        """Literature discovery for deep-research agents: search a topic across
+        PubMed + OpenAlex and machine-verify EVERY hit at birth (five-state
+        verdicts against official registries, retraction checks included).
+
+        Returns per-reference verdicts plus source notes (rate-limit/skip
+        declarations). A deep-research loop can drop invalid hits immediately
+        and keep verified ones. Batch ceiling: limit is capped at 25."""
+        limit = max(1, min(int(limit or 8), 25))
+        refs, notes = vr.discover_refs(topic, limit, float(timeout),
+                                       sort=sort if sort in (
+                                           "relevance", "cited", "newest")
+                                       else "relevance")
+        if not refs:
+            return json.dumps({"version": vr.VERSION, "topic": topic,
+                               "notes": notes, "results": [],
+                               "hint": "双源零命中——换检索词或检查网络"},
+                              ensure_ascii=False, indent=1)
+        payload = json.loads(verify_references_impl(refs, timeout, 800))
+        payload["discover_notes"] = notes
+        return json.dumps(payload, ensure_ascii=False, indent=1)
+
+    @mcp.tool
+    def build_review_kit(results: list, topic: str = "") -> str:
+        """Turn verified results into a review-ready kit (markdown).
+
+        Pass the results array returned by verify_references/discover_references;
+        returns a comparison table (verified first, citation counts), an annotated
+        bibliography, and a paste-ready GB/T 7714 list — every row carrying its
+        verdict (partial never reads as verified). Zero network calls."""
+        safe = [dict(r, title=vr._CLIP_STR and str(r.get("title") or "")[:800])
+                if isinstance(r, dict) and r.get("verdict") else r
+                for r in (results or [])]
+        kit = vr.build_review_kit(safe, [], topic=str(topic or "")[:200])
+        return _clip(kit, _CLIP_STR)
+
     @mcp.resource("cite-holmes://capability-matrix")
     def capability_matrix_resource() -> str:
         """What this verifier catches, what stays with the semantic layer,

@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 5.6.0
+version: 5.7.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -59,8 +59,7 @@ Three differences from a plain "search and summarize":
 python scripts/verify_refs.py --refs refs.json --out report.md
 # 3. read report.md — CiteScore + pre-submission conclusion at the top.
 # Paper? add --export bibtex.  Medical? add --profile medical.
-# Literature hunt? --discover "topic" --review-kit — every hit verified at
-# birth, review-ready table + annotated bibliography + GB/T out.
+# Literature hunt? --discover "topic" --review-kit (verified at birth, kit out).
 # Already verified once? add --grill report.json for the review checklist.
 ```
 
@@ -212,10 +211,11 @@ correct" — that is the semantic layer's job; never treat `unreachable` as
 
 ## Security, honest limits, FAQ
 
-- Security & behavior declaration: single-run; HTTPS-only to the official
-  academic registries (doi.org / api.crossref.org / eutils.ncbi.nlm.nih.gov /
+- Security & behavior declaration: single-run; HTTPS-only to official academic
+  registries (doi.org / api.crossref.org / eutils.ncbi.nlm.nih.gov /
   export.arxiv.org / api.openalex.org / api.semanticscholar.org / archive.org /
-  pubmed.ncbi.nlm.nih.gov); zero telemetry. Full text: `references/security.md`
+  pubmed.ncbi.nlm.nih.gov) **and the source URLs you submit**; zero telemetry.
+  Full text: `references/security.md`
 - Honest limits & explicit non-goals: `references/out-of-scope.md`
 - Common questions: `references/faq.md`
 - No web tools? Say honestly that only "user-supplied material + mechanical

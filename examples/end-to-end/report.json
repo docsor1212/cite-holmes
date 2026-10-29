@@ -1,5 +1,5 @@
 {
-  "version": "3.7.0",
+  "version": "5.5.0",
   "profile": "general",
   "offline": false,
   "bluf": {
@@ -7,7 +7,7 @@
     "key_numbers": "CiteScore 40/100 (D), verified 0/1, invalid 0, 复核 0 条（其中撤稿 0 条）",
     "blocker": "1 条 partial",
     "next_action": "partial 项在正文引用时注明保留意见",
-    "cite_holmes_version": "3.7.0",
+    "cite_holmes_version": "5.5.0",
     "score": 40,
     "grade": "D",
     "counts": {
@@ -18,7 +18,7 @@
       "invalid": 0
     }
   },
-  "bluf_yaml": "---\nverdict: 可用：0/1 条 verified,1 条 partial 需降级使用\nkey_numbers: CiteScore 40/100 (D), verified 0/1, invalid 0, 复核 0 条（其中撤稿 0 条）\nblocker: 1 条 partial\nnext_action: partial 项在正文引用时注明保留意见\ncite_holmes_version: 3.7.0\n---",
+  "bluf_yaml": "---\nverdict: 可用：0/1 条 verified,1 条 partial 需降级使用\nkey_numbers: CiteScore 40/100 (D), verified 0/1, invalid 0, 复核 0 条（其中撤稿 0 条）\nblocker: 1 条 partial\nnext_action: partial 项在正文引用时注明保留意见\ncite_holmes_version: 5.5.0\n---",
   "scorecard": {
     "score": 40,
     "grade": "D",

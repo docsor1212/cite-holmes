@@ -77,7 +77,7 @@ _Avoid_: 版本警告、preprint alarm
 verified 条目可从注册库 CSL 回填的导出字段计分（0–100）——告诉你差哪些字段。
 _Avoid_: 质量分、字段分
 
-## 错误码（`error_codes` 字段，11 类，机器可读）
+## 错误码（`error_codes` 字段，12 类，机器可读）
 
 错误码是五态之上的**原因细分**（如 E_DOU_NOT_FOUND / E_TITLE_MISMATCH / E_CROSS_LANG），
 人话翻译见 `--explain N` 输出。

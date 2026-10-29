@@ -38,3 +38,11 @@ python scripts/verify_refs.py --refs refs.json --preset submission
   上一轮未决条目再生：`--next-round report.json`；过程留痕：`--trace`。
 - 概念与判定语义：`references/verification-details.md`；任务路由：
   `references/INDEX.md`。
+
+## 示例请求（怎么说会触发什么）
+
+- 「帮我核验这份参考文献列表」/「这些 DOI 是真的吗」→ 引用核验
+- 「找近三年 XX 主题的文献，导出 GB/T」→ --discover + --review-kit
+- 「深度研究 XX 的研究现状」→ 五阶段工作流（QUICK/FULL 自适应）
+- 「投稿前帮我终检参考文献」→ --preset submission
+- 「这份报告经得起审稿人挑刺吗」→ --grill

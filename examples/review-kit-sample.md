@@ -1,10 +1,10 @@
 <!-- 样例来源：真实公开数据，非模拟。数据通路=PubMed E-utilities（题录）+ DOI.org/Crossref 注册库（判定）+ Semantic Scholar Graph API（被引数）。
 复现命令：python3 scripts/verify_refs.py --discover "bronchiolitis infant diagnosis" --discover-limit 6 --discover-sort cited --review-kit --cn
-生成：2026-10-24，cite-holmes 4.8.0 开发版引擎真实运行产物（4.9.0 特性预演；判定逻辑与 4.9.0 发布版一致）。被引数随时间自然增长、S2/OpenAlex 限流时个别条目显示「—」（诚实降级设计）——重跑数值略有差异属预期。 -->
+生成：2026-10-24 真实运行产物（判定逻辑与当前版本一致；正文中的引擎版本号为生成时点快照）。被引数随时间自然增长、S2/OpenAlex 限流时个别条目显示「—」（诚实降级设计）——重跑数值略有差异属预期。 -->
 
 # 文献综述工作台（review-kit）
 
-- 主题：bronchiolitis infant diagnosis｜生成：2026-10-24｜cite-holmes v4.8.0
+- 主题：bronchiolitis infant diagnosis｜生成：2026-10-24（历史样例）
 - 核验总览：共 5 条——✅ verified 5
 - 判定语义：verified=官方注册库核验一致；partial=部分确认，引用前请人工过目；invalid=编造或错引（不得引用）；unverified/unreachable=未能核验（查无永不判死）
 

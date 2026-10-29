@@ -20,6 +20,21 @@ Reproduce it yourself — the planted-fakes file ships with the repo:
 python scripts/verify_refs.py --refs examples/demo_refs.json
 ```
 
+
+## 你可能会这样说（示例请求）
+
+**核验引用**：「帮我核验这份参考文献列表」「这些 DOI 是真的吗」「查一下这几篇论文是否被撤稿」
+
+**查文献**：「帮我找近三年关于支气管炎诊疗的文献，要能导出 GB/T 格式」「做个 COPD 综述的文献清单」
+
+**深度研究**：「调研一下 CRISPR 温度传感的研究现状」「深度研究 A 和 B 两条技术路线的优劣」
+
+**医学场景**：「这份儿科指南的参考文献可信吗」「核验这篇论文的 PMID 和 DOI」
+
+**投稿前**：「投稿前帮我终检参考文献」「对这份报告做一次审稿人视角的审查」
+
+以上任一说法都会触发对应能力；翻译、润色、改写类请求不会触发。
+
 ## 30-second quickstart
 
 ```bash
@@ -221,6 +236,8 @@ normalized by reference count) with an A–D grade. Screenshot it, quote it,
 or gate your CI on it (`--strict`).
 
 ## What's new
+
+**v5.7.0** — consistency hardening: error-code count unified to 12, stale version stamps removed, security declaration now covers user-submitted URLs, example artifacts refreshed with a freshness scan, grouped request examples in the README, and ADR-0009 for the dual-copy design.
 
 **v5.6.0** — open-access enrichment (Unpaywall license/free-to-read status behind `--mailto`, data only, never verdicts) and MCP surface 3→5 (`discover_references` birth-verified topic search + `build_review_kit`); HTML report reaches md parity on scholarly usage and OA.
 

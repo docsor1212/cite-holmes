@@ -248,7 +248,12 @@ class F45_PubmedLanding404(unittest.TestCase):
         ref = {"title": "Tocilizumab efficacy in sJIA landmark trial",
                "url": "https://pubmed.ncbi.nlm.nih.gov/99999999/",
                "pmid": "99999999", "source": "Journal of X", "year": 2025}
-        with unittest.mock.patch.object(vr.urllib.request, "urlopen",
+        with unittest.mock.patch.object(
+                vr, "check_url",
+                return_value=(False, 404, "HTTP 404（站点拒绝或页面不存在）")), \
+             unittest.mock.patch.object(vr, "wayback_available",
+                                        return_value=""), \
+             unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         self._stub(err)), \
              unittest.mock.patch.object(vr.time, "sleep", lambda s: None):
             out = vr.verify_one(ref, 5, False, 10.0, False)
@@ -263,7 +268,12 @@ class F45_PubmedLanding404(unittest.TestCase):
         ref = {"title": "[Clinical practice guidelines]",
                "url": "https://pubmed.ncbi.nlm.nih.gov/39429074/",
                "pmid": "39429074", "source": "J", "year": 2024}
-        with unittest.mock.patch.object(vr.urllib.request, "urlopen",
+        with unittest.mock.patch.object(
+                vr, "check_url",
+                return_value=(False, 404, "HTTP 404（站点拒绝或页面不存在）")), \
+             unittest.mock.patch.object(vr, "wayback_available",
+                                        return_value=""), \
+             unittest.mock.patch.object(vr.urllib.request, "urlopen",
                                         self._stub(ok)), \
              unittest.mock.patch.object(vr.time, "sleep", lambda s: None):
             out = vr.verify_one(ref, 6, False, 10.0, False)
@@ -276,11 +286,15 @@ class F45_PubmedLanding404(unittest.TestCase):
                "pmid": "99999999", "source": "J", "year": 2025}
 
         def stub(req, timeout=None):
-            if "pubmed.ncbi.nlm.nih.gov" in req.full_url:
-                import urllib.error
-                raise urllib.error.HTTPError(req.full_url, 404, "NF", None, None)
-            raise IOError("reset")   # E-utilities 传输失败
-        with unittest.mock.patch.object(vr.urllib.request, "urlopen", stub), \
+            if "esummary" in req.full_url:
+                raise IOError("reset")   # E-utilities 传输失败
+            raise AssertionError("意外外呼 " + req.full_url)
+        with unittest.mock.patch.object(
+                vr, "check_url",
+                return_value=(False, 404, "HTTP 404（站点拒绝或页面不存在）")), \
+             unittest.mock.patch.object(vr, "wayback_available",
+                                        return_value=""), \
+             unittest.mock.patch.object(vr.urllib.request, "urlopen", stub), \
              unittest.mock.patch.object(vr.time, "sleep", lambda s: None):
             out = vr.verify_one(ref, 5, False, 10.0, False)
         self.assertEqual(out["verdict"], "unreachable")

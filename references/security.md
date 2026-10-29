@@ -10,11 +10,12 @@
 - 无 OS 集成：无子进程、无系统服务、无权限变更；文件访问仅限你传入的输入/
   输出路径、本地缓存（`~/.cache/cite-holmes/`）与报告输出。
 
-## 网络边界（始终 HTTPS，仅限官方学术注册库）
+## 网络边界（始终 HTTPS，官方学术注册库与用户提交的来源 URL）
 
 `doi.org` · `api.crossref.org` · `eutils.ncbi.nlm.nih.gov` ·
 `export.arxiv.org` / `arxiv.org` · `archive.org` · `api.openalex.org` ·
 `api.semanticscholar.org` · `pubmed.ncbi.nlm.nih.gov`
+- 你提交的来源 URL 也在检查范围内（可达性探测 + 死链 Wayback 对照）——检查器会访问用户提供的链接，不仅是上方注册库。
 
 不访问任何其他主机；零遥测、零分析、零数据收集。唯一外呼 payload 是你要求
 核验的标识符与标题。

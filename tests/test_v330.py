@@ -124,7 +124,7 @@ class TestL4NliWiring(unittest.TestCase):
         self.assertNotIn("l2_confidence", rec)
 
     def test_t11_version(self):
-        self.assertEqual(vr.VERSION, "5.6.0")
+        self.assertEqual(vr.VERSION, "5.7.0")
 
 
 if __name__ == "__main__":

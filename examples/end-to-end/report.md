@@ -3,11 +3,11 @@ verdict: 可用：0/1 条 verified,1 条 partial 需降级使用
 key_numbers: CiteScore 40/100 (D), verified 0/1, invalid 0, 复核 0 条（其中撤稿 0 条）
 blocker: 1 条 partial
 next_action: partial 项在正文引用时注明保留意见
-cite_holmes_version: 3.7.0
+cite_holmes_version: 5.5.0
 ---
 
 # 引用机械验证报告
-- 验证器：verify_refs.py v3.7.0 · 模式：online
+- 验证器：verify_refs.py v5.5.0 · 模式：online
 - 🟡 投稿前结论：可提交，但建议先处理 1 条 partial（降级使用项，正文引用需注明保留意见）
 
 ## CiteScore 置信度评分

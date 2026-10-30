@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "5.7.0"
+VERSION = "5.8.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -5799,7 +5799,8 @@ def main() -> int:
         print(f"[easy] 傻瓜模式：医学预设={'开' if medical else '关'}；自动导出 {args.export}")
 
     def _safe_verify_one(i, ref):
-        # 单条坏数据（非对象/标量/处理异常）降级为该条 invalid，绝不拖垮整批
+        # 单条坏数据（非对象/标量）确凿 invalid；处理异常降 unverified+转人工
+        # （v5.8.0 语义保真：程序故障≠确凿判死），两类都绝不拖垮整批
         if not isinstance(ref, dict):
             return {"index": i, "title": str(ref)[:48], "url": "", "doi": "", "pmid": "",
                     "arxiv": "", "source": "", "year": None, "tier": "-", "semantic": "",
@@ -5823,10 +5824,18 @@ def main() -> int:
         try:
             r = verify_one(ref, i, args.offline, args.timeout, medical)
         except Exception as e:
+            # v5.8.0 语义保真：程序故障≠机械层确凿判死——invalid 的语义保留给
+            # 真实伪造（评测 errorHandling 点名），故障条目降 unverified+转人工；
+            # 审计 P2：回填原始标识符，--next-round 骨架不退化为纯标题重试
             return {"index": i, "title": str(ref.get("title") or "")[:48] or "(无标题)",
-                    "url": "", "doi": "", "pmid": "", "arxiv": "", "source": "", "year": None,
-                    "tier": "-", "semantic": "", "verdict": "invalid",
-                    "http_status": None, "note": f"条目处理异常（{type(e).__name__}）",
+                    "url": str(ref.get("url") or ""), "doi": str(ref.get("doi") or ""),
+                    "pmid": str(ref.get("pmid") or ""),
+                    "arxiv": str(ref.get("arxiv") or ""),
+                    "source": str(ref.get("source") or ""), "year": ref.get("year"),
+                    "tier": "-", "semantic": "", "verdict": "unverified",
+                    "http_status": None,
+                    "note": f"条目处理异常（{type(e).__name__}）——非判定结果，"
+                            f"建议 --refresh-cache 重跑；持续复现请反馈",
                     "needs_human_check": True, "checks": {}}
         if dc_key and r.get("verdict") in _DC_CACHEABLE:
             _dc_put(_dc_path(args), dc_key, r)
@@ -5849,7 +5858,8 @@ def main() -> int:
         # 并行下不做逐条 interval（并发本身就是节流；单主机礼貌由断路器+限速锁保证）。
 
         def _task(i, ref):
-            # 双保险：任何意外异常都降级为该条 invalid，绝不拖垮整批
+            # 双保险：任何意外异常都降 unverified+转人工（v5.8.0 语义保真），
+            # 绝不拖垮整批
             try:
                 return _safe_verify_one(i, ref)
             except Exception as e:
@@ -5857,8 +5867,10 @@ def main() -> int:
                         "title": (str(ref.get("title") if isinstance(ref, dict) else ref)[:48]
                                   or "(无标题)"),
                         "url": "", "doi": "", "pmid": "", "arxiv": "", "source": "",
-                        "year": None, "tier": "-", "semantic": "", "verdict": "invalid",
-                        "http_status": None, "note": f"条目处理异常（{type(e).__name__}）",
+                        "year": None, "tier": "-", "semantic": "", "verdict": "unverified",
+                        "http_status": None,
+                        "note": f"条目处理异常（{type(e).__name__}）——非判定结果，"
+                                f"建议 --refresh-cache 重跑；持续复现请反馈",
                         "needs_human_check": True, "checks": {}}
 
         with ThreadPoolExecutor(max_workers=min(workers, len(refs))) as ex:
@@ -6024,6 +6036,14 @@ def main() -> int:
             f.write(render_audit_report(results, cd, scorecard))
         print(f"稿件审计：{_audit_path}（P0 编造嫌疑/P1 高风险/P2 复核 分级+行动清单）")
 
+    _n_crash = sum(1 for r in results
+                   if str(r.get("note") or "").startswith("条目处理异常"))
+    if _n_crash:
+        # 审计 P2：整体性引擎故障=全 unverified+exit 0，CI 机器信号会全哑——
+        # strict 下对「处理异常」条目显式 stderr 警示，防故障被当干净批吞掉
+        print(f"⚠️ {_n_crash} 条处理异常（unverified，不计 strict 失败）——"
+              "若整批大面积出现，多为引擎/环境故障而非引用问题，请排查后重跑",
+              file=sys.stderr)
     bad = [r for r in results if r["verdict"] in ("unreachable", "invalid")]
     print(f"\n报告：{args.out}\nJSON：{json_path}")
     if bad:

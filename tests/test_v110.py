@@ -69,7 +69,7 @@ class TestV110(unittest.TestCase):
     # ---------- 版本 ----------
 
     def test_version_bumped_110(self):
-        self.assertEqual(vr.VERSION, "5.7.0")
+        self.assertEqual(vr.VERSION, "5.8.0")
 
     # ---------- 并行验证 ----------
 
@@ -156,8 +156,11 @@ class TestV110(unittest.TestCase):
         self.assertIn("条目不是对象", doc["results"][1]["note"])
         self.assertEqual(doc["results"][0]["verdict"], "verified")
 
-    def test_parallel_verify_one_crash_becomes_invalid(self):
-        # verify_one 内部抛异常 → 该条 invalid，绝不拖垮整批（并行下同样成立）
+    def test_parallel_verify_one_crash_lands_unverified(self):
+        # verify_one 内部抛异常 → 绝不拖垮整批（并行下同样成立）。
+        # v5.8.0 语义保真修订：崩溃条目从 invalid 改 unverified——invalid 的
+        # 语义是「机械层确凿判死」，程序故障不姓这个语义（评测 errorHandling 点名）
+
         def boom(ref, idx, offline, timeout, medical=False):
             if idx == 2:
                 raise RuntimeError("simulated crash")
@@ -174,7 +177,7 @@ class TestV110(unittest.TestCase):
                                     "--interval", "0"])
         self.assertEqual(rc, 0)
         doc = json.load(open(out.rsplit(".", 1)[0] + ".json", encoding="utf-8"))
-        self.assertEqual(doc["results"][1]["verdict"], "invalid")
+        self.assertEqual(doc["results"][1]["verdict"], "unverified")
         self.assertIn("RuntimeError", doc["results"][1]["note"])
         self.assertTrue(doc["results"][1]["needs_human_check"])
 

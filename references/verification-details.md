@@ -32,10 +32,13 @@ short version; this file is the complete reference.
 - **arXiv** (v1.5): official export.arxiv.org API (≥3 s/request politeness
   pause). Unknown ID or API error element → `invalid`. Same 0.50/0.82
   similarity thresholds as DOI.
-- **Retraction** (v1.8): Crossref REST API `updated-by[]` (Retraction Watch
-  data, updated daily). Any `type == "retraction"` → capped at `partial` +
-  human-review flag. Check failures are silently skipped — never penalize a
-  reference for the checker's network.
+- **Retraction** (v1.8, semantics current as of v4.1): Crossref REST API
+  `updated-by[]` (Retraction Watch data, updated daily). Notice types are
+  graded, not binary: retraction / partial-retraction / withdrawal →
+  `partial` + human-review flag (retracted flag in workpaper); Expression of
+  Concern → caps `verified` at `partial`; correction → note only. A failed
+  check is flagged explicitly (`check_failed`) — never silently skipped and
+  never penalize a reference for the checker's network.
 - **OpenAlex bibliographic check** (v1.8, v1.9 keys): for references without
   DOI/PMID/arXiv, title search against OpenAlex. Best of full/prefix title
   similarity ≥ 0.82 → "confirmed exists"; 0.60–0.82 → "near match, review";

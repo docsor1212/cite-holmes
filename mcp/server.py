@@ -1,6 +1,6 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""cite-holmes MCP server (v2.0.0) — 三原语形态(tools/resources/prompts)。
+"""cite-holmes MCP server — 五工具 tools + resources + prompts 形态。
 
 运行(需 FastMCP 环境):
     uvx --from "git+https://github.com/docsor1212/cite-holmes#subdirectory=mcp" cite-holmes-mcp
@@ -98,8 +98,10 @@ def verify_references_impl(claims: list, timeout: float = 15.0,
         try:
             r = vr.verify_one(ref, i, False, float(timeout), False)
         except Exception as e:
+            # v5.8.0 语义保真：程序故障≠确凿判死（invalid 保留给真实伪造）
             r = {"index": i, "title": str(ref.get("title") or "")[:48],
-                 "verdict": "invalid", "note": f"处理异常（{type(e).__name__}）",
+                 "verdict": "unverified",
+                 "note": f"处理异常（{type(e).__name__}）——非判定结果，建议重跑或反馈",
                  "needs_human_check": True}
         results.append(r)
     vr.mark_duplicates(results)
@@ -204,11 +206,18 @@ if _MCP_OK:
         vr._net_reset()
         results = []
         for i, ref in enumerate(claims, 1):
+            if not isinstance(ref, dict):
+                # 审计 P1-③：逐条隔离镜像——非对象条目确凿 invalid，不再让
+                # except 兜底内的 ref.get 二次抛出把整个 tool call 打崩
+                results.append({"index": i, "title": str(ref)[:48],
+                                "verdict": "invalid", "note": "条目不是对象",
+                                "needs_human_check": True})
+                continue
             try:
                 results.append(vr.verify_one(ref, i, False, float(timeout), False))
             except Exception:
                 results.append({"index": i, "title": str(ref.get("title") or "")[:48],
-                                "verdict": "invalid", "note": "处理异常",
+                                "verdict": "unverified", "note": "处理异常——非判定结果",
                                 "needs_human_check": True})
         vr.mark_duplicates(results)
         vr.apply_semantic_cap(results)
@@ -308,7 +317,7 @@ def main(argv=None):
     """
     ap = argparse.ArgumentParser(
         prog="cite-holmes-mcp",
-        description="cite-holmes MCP server — 机械引用核验(tools/resources/prompts 三原语)")
+        description="cite-holmes MCP server — 机械引用核验(5 tools + resources + prompts)")
     ap.add_argument("--transport", choices=("stdio", "http", "sse"), default="stdio",
                     help="传输方式(默认 stdio;http 监听 127.0.0.1:8760)")
     ap.add_argument("--host", default="127.0.0.1", help="http/sse 模式监听地址")

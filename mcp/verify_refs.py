@@ -82,7 +82,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-VERSION = "5.8.0"
+VERSION = "5.9.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -4579,6 +4579,9 @@ def build_review_kit(results: list, refs: list = None, topic: str = "",
         _ul = usage_line(r.get("citation_contexts"))
         if _ul:
             out.append(f"  - 学界用法（≤3 条抽样）：{_ul}")  # 审计 P3-2：kit 无区级免责，就地声明
+        _sig = context_signal(r.get("citation_contexts"))  # v5.9.0
+        if _sig:
+            out.append(f"  - 语境信号（advisory）：{_sig}")
         _oa = (r.get("checks") or {}).get("open_access") or {}
         if _oa.get("ran"):
             if _oa.get("is_oa"):
@@ -4757,6 +4760,47 @@ def usage_line(cc) -> str:
     return "；".join(seg)
 
 
+# v5.9.0 引文语境分歧信号：对比/质疑句式模式（中英）。S2 intents 只有
+# background/methodology/result 三分类（官方口径），不标注争议性——
+# 对比型语境（SciCite 分类学的 compare_or_contrast 方向）由本地启发式补位，
+# 零新增外呼、零新增依赖。词边界与否定词排除按对抗审计 P3 收口：
+# (?<!not )\bunlike\b 不吃 "not unlike"（双否=赞同），\brefut(e[ds]?|ing)\b
+# 不吃 "irrefutable"（强赞同），(?<!不)但 不吃「不但」夸赞句式，
+# 挑战(?!性) 不吃「极具挑战性」；fail(s|ed|ing)? to 补齐
+# "failed to generalize" 类漏报。「相反数」类数学词在引用语境近乎不出现
+# （审计判定为可接受误报，不设窄补丁）。
+_CONTRAST_RE = re.compile(
+    r"(however|in contrast|(?<!not )\bunlike\b|contrary|contradict\w*|"
+    r"\brefut(e[ds]?|ing)\b|\bdisput(e[ds]?|ing)\b|"
+    r"\bchallenge[sd]?\b|\bquestion(s|ed|ing)?\b|fail(s|ed|ing)? to|"
+    r"unable to|inconsisten\w*|"
+    r"(?<!不)但|然而|与此相反|相反|并未|未能|不一致|质疑|挑战(?!性)|反驳|矛盾|争议)",
+    re.I)
+
+
+def context_signal(cc) -> str:
+    """v5.9.0 引文语境分歧信号（advisory 展示层）：对 S2 抽样语境跑
+    对比/质疑句式启发式扫描，命中达到保守阈值时提示「学界表述存在分歧」。
+    阈值设计：命中 ≥50% 抽样——3 条抽样仅 1 条含转折词属学术写作常态，
+    不报（避免把常规转折误渲染成学术争议）；抽样即语境（1/1、1/2 命中）。
+    纯呈现层信号：绝不改判定、
+    不挂复核旗（宪法同 v5.0 usage_line——存在性佐证与判定分离）；启发式
+    必有漏报误报，双向如实声明于文档。无命中返回空串（调用方不渲染——
+    老输出逐字节不变）。"""
+    if (not isinstance(cc, dict)
+            or not isinstance(cc.get("samples"), list)):
+        return ""
+    samples = cc.get("samples") or []
+    if not samples:
+        return ""
+    hits = sum(1 for s in samples
+               if _CONTRAST_RE.search(str(s.get("context") or "")))
+    if hits * 2 < len(samples):  # ≥50% 门槛：3 抽样仅 1 条转折属学术写作常态不报
+        return ""
+    return (f"分歧信号 {hits}/{len(samples)}：抽样语境含对比/质疑型表述——"
+            "学界对该文结论存在不同声音，引用前建议人工复核原文语境")
+
+
 def render_md(results: list, offline: bool, profile: str = "general",
               context_check: dict = None) -> str:
     sc = compute_scorecard(results)
@@ -4838,6 +4882,15 @@ def render_md(results: list, offline: bool, profile: str = "general",
             _cc = r.get("citation_contexts") or {}
             lines.append(f"| {r['index']} | {_cc.get('cited_by', '—')} | "
                          f"{md_cell(usage_line(_cc), 130)} |")
+    # v5.9.0 分歧信号（advisory；有信号才渲染——无信号老输出逐字节不变）。
+    # 审计 P2：独立于 usage_rows 门扫全量——usage_line 空而信号非空的行
+    # （如首样本 contexts[0]==""）不再静默丢失，与 kit 渲染器口径一致。
+    _sig_rows = [(r, context_signal(r.get("citation_contexts")))
+                 for r in results]
+    _sig_rows = [(r, s) for r, s in _sig_rows if s]
+    if _sig_rows:
+        lines += ["", "⚠ 分歧信号（启发式 advisory，绝不改变判定）：",
+                  *[f"- #{r['index']} {s}" for r, s in _sig_rows]]
     lines += ["", "## 能力边界矩阵", "",
               "- ✅ 机械层已抓伪造类型：" + "；".join(capability_matrix()["caught"]),
               "- 🧠 仍需语义层把关：" + "；".join(capability_matrix()["semantic"]),
@@ -4993,13 +5046,20 @@ def render_html(results: list, offline: bool, profile: str = "general",
         sem_html = ""
 
     # v5.6.0 HTML 学界用法节（对齐 md 层；无数据整段不渲染——老输出不变）
-    usage_rows_h = [r for r in results if usage_line(r.get("citation_contexts"))]
+    # v5.9.0 审计 P2：行集合以 usage_line or context_signal 双门取全量，
+    # 信号不因 usage_line 空而静默丢失（与 md/kit 渲染器口径一致）
+    usage_rows_h = [r for r in results
+                    if usage_line(r.get("citation_contexts"))
+                    or context_signal(r.get("citation_contexts"))]
     if usage_rows_h:
-        _trs = "".join(
-            f"<tr><td>{r['index']}</td>"
-            f"<td>{e(str((r.get('citation_contexts') or {}).get('cited_by', '—')))}</td>"
-            f"<td>{e(usage_line(r.get('citation_contexts')))}</td></tr>"
-            for r in usage_rows_h)
+        _trs = ""
+        for r in usage_rows_h:
+            _u = usage_line(r.get("citation_contexts"))
+            _s = context_signal(r.get("citation_contexts"))  # 并入学界用法单元格
+            _cell = "；".join(x for x in (_u, _s) if x)
+            _trs += (f"<tr><td>{r['index']}</td>"
+                     f"<td>{e(str((r.get('citation_contexts') or {}).get('cited_by', '—')))}</td>"
+                     f"<td>{e(_cell)}</td></tr>")
         usage_html = (f"<h2>学界用法（引文语境）</h2>"
                       f"<p class='meta'>后续文献如何使用该论文——语境是增强信号，"
                       f"绝不改变判定；覆盖率低属诚实边界。</p>"

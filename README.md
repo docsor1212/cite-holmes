@@ -237,6 +237,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v5.9.0** — citation-context divergence signals in the scholarly-usage panel (heuristic contrastive-phrasing scan over S2 samples with a conservative threshold; advisory only, never a verdict, zero extra network calls) plus benchmark and ADR documentation truth fixes.
+
 **v5.8.0** — verdict-semantics fidelity: internal exceptions land unverified (never invalid) across CLI and MCP, with actionable notes; MCP docs aligned with the 5-tool reality; retraction-semantics docs refreshed. Zero change to the main verdict paths.
 
 **v5.7.0** — consistency hardening: error-code count unified to 12, stale version stamps removed, security declaration now covers user-submitted URLs, example artifacts refreshed with a freshness scan, grouped request examples in the README, and ADR-0009 for the dual-copy design.

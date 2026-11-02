@@ -24,9 +24,10 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 import verify_refs as vr  # noqa: E402
 
-# 内置金标集的公开设计（examples/demo_refs.json 实测形态）：#6=假 DOI、
-# #7=假 arXiv、#8=无任何标识符——offline 结构层实锤对象是 #8（缺标识符→
-# invalid）；#6/#7 良构伪造 offline 诚实降 partial（docs/benchmark.md 边界 1）
+# 内置金标集的公开设计（examples/demo_refs.json 实测形态）：#6=良构假 DOI、
+# #7=编造 URL（着陆页不存在、无注册库标识符）、#8=无任何标识符与 URL——
+# offline 结构层实锤对象是 #8（缺标识符→invalid）；#6/#7 良构伪造 offline
+# 诚实降 partial（docs/benchmark.md 边界 1）
 GOLDEN_PLANTED = (6, 7, 8)
 GOLDEN_CLEAN = (1, 2, 3, 4, 5)
 

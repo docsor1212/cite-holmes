@@ -12,7 +12,8 @@ AI 研究工具的引用质量是行业性短板（学术媒体与图书馆界 2
 ## 数据
 
 - **内置金标集**：`examples/demo_refs.json`——8 条引用，其中 3 处预埋伪造
-  （#6=假 DOI、#7=假 arXiv、#8=无任何标识符）。该文件随包分发，公开可查：
+  （#6=良构假 DOI、#7=编造 URL（着陆页不存在、无任何注册库标识符）、
+  #8=无任何标识符与 URL 的裸条目）。该文件随包分发，公开可查：
   offline 结构层的实锤对象是 #8（缺 url 且无可解析标识符——结构层判
   invalid）；#6/#7 的伪造属性 offline 下诚实降为 partial（见诚实边界 1）。
 - **外部标注集**：任何 JSON 均可——`{"refs": [...], "expected":
@@ -42,9 +43,10 @@ python tools/run_eval.py --refs your_labeled.json --net   # 自备标注集 · �
 
 ## 诚实边界（必读）
 
-1. **offline 口径只测结构层**：良构的假 DOI/假 arXiv（格式合法）offline 下
+1. **offline 口径只测结构层**：良构的假 DOI/假 arXiv ID（格式合法）与
+   编造 URL（结构合法的着陆页地址）offline 下
    **不能**实锤——诚实降为 partial，只有 online 注册库比对能判 invalid；
-   offline 能实锤的仅「缺标识符/结构不合法」类。这不是漏抓，是不装懂
+   offline 能实锤的仅「缺标识符/结构不合法」类（如 #8）。这不是漏抓，是不装懂
    （查无永不判死铁律）。在线路径对无标识符引用走题名反查（partial/
    unverified），与 offline 结构层判 invalid 的口径差异如实声明。
 2. **online 数字随上游漂移**：注册库（DOI.org/PubMed/arXiv）数据每日变化，

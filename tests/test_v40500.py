@@ -4,6 +4,7 @@
 
 背景（2026-10-19 调研）：「查文献/综述」邻域已有大体量检索类 skill；本版差异化
 =文献发现与核验一体（每条出生即核验）。全部 sealed（零真网依赖）。"""
+from _mocks import engine_full_text  # noqa: E402
 import json
 import os
 import sys
@@ -13,7 +14,7 @@ import unittest.mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 import verify_refs as vr  # noqa: E402
-from _mocks import fresh_engine_state  # noqa: E402
+from _mocks import fresh_engine_state  # noqa: E402, engine_full_text
 
 
 def _resp(body):
@@ -149,8 +150,7 @@ class F17_DescReach(unittest.TestCase):
             self.assertIn(kw, t, kw)
 
     def test_discover_in_help(self):
-        src = open(os.path.join(HERE, "..", "scripts", "verify_refs.py"),
-                   encoding="utf-8").read()
+        src = engine_full_text()
         assert '"--discover"' in src and '"--demo"' in src
 
 

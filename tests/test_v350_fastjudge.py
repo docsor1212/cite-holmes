@@ -7,11 +7,10 @@ import importlib.util, os, sys, unittest
 from unittest import mock
 
 HERE = os.path.dirname(os.path.abspath(__file__))
-spec = importlib.util.spec_from_file_location(
-    "verify_refs", os.path.join(HERE, "..", "scripts", "verify_refs.py"))
-vr = importlib.util.module_from_spec(spec)
-sys.modules["verify_refs"] = vr
-spec.loader.exec_module(vr)
+# v6.0.0 常规 import（spec_from_file_location 会加载第二个壳实例，
+# 覆盖 sys.modules['ch_*'] 引发双实例互踩——模块化时代禁用该加载法）
+sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
+import verify_refs as vr  # noqa: E402
 
 TITLE = "Lethal autoimmune myocarditis in interferon-gamma receptor-deficient mice"
 

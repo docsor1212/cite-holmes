@@ -14,6 +14,7 @@ import unittest.mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 import verify_refs as vr  # noqa: E402
+from _mocks import engine_full_text  # noqa: E402
 
 
 def _mk(i, title, doi="", year=None, source="", verdict="verified"):
@@ -207,14 +208,13 @@ class TestPreprintUpgrades(unittest.TestCase):
 
     def test_offline_guard_in_main(self):
         # offline 显式守卫:main 批处理对 preprint 提示有 offline 短路
-        src = open(os.path.join(HERE, "..", "scripts", "verify_refs.py"),
-                   encoding="utf-8").read()
-        self.assertIn("0 if args.offline else annotate_preprint_upgrades", src)
+        src = engine_full_text()
+        self.assertIn("0 if args.offline else _ROOT.annotate_preprint_upgrades", src)
 
 
 class TestVersionAndDocs(unittest.TestCase):
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "5.9.0")
+        self.assertEqual(vr.VERSION, "6.0.0")
 
     def test_capability_matrix_lists_new(self):
         cap = vr.capability_matrix()
@@ -223,7 +223,7 @@ class TestVersionAndDocs(unittest.TestCase):
 
     def test_skill_md_updated(self):
         t = open(os.path.join(HERE, "..", "SKILL.md"), encoding="utf-8").read()
-        self.assertIn("version: 5.9.0", t)
+        self.assertIn("version: 6.0.0", t)
         self.assertIn("bibliography profiling", t.lower())
         self.assertIn("preprint", t.lower())
 

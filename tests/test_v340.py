@@ -2,13 +2,10 @@
 """v3.4 池:PMID 元数据核验+期刊缩写展开 单元测试(离线确定性)"""
 import importlib.util, os, sys, unittest
 
-spec = importlib.util.spec_from_file_location(
-    "vr", os.path.expanduser("~/ZCodeProject/skill/ch_pool_dev/trunk/scripts/verify_refs.py"))
-vr = importlib.util.module_from_spec(spec)
-try:
-    spec.loader.exec_module(vr)
-except SystemExit:
-    pass
+# v6.0.0 常规 import 本 trunk 引擎（旧 spec 指向 ch_pool_dev 外部旧副本——
+# 模块化后外部副本无 ch_* 层不可再加载；测试语义对本 trunk 引擎同样有效）
+sys.path.insert(0, os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts"))
+import verify_refs as vr  # noqa: E402
 
 
 class TestJournalConsistent(unittest.TestCase):

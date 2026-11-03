@@ -63,10 +63,10 @@ class TestGrillReport(unittest.TestCase):
             mu.assert_not_called()
 
     def test_cli_wiring(self):
-        src = open(os.path.join(SK, "scripts", "verify_refs.py"),
-                   encoding="utf-8").read()
+        from _mocks import engine_full_text
+        src = engine_full_text()
         self.assertIn('ap.add_argument("--grill", metavar="REPORT_JSON"', src)
-        self.assertIn("render_grill_md(items, sc)", src)
+        self.assertIn("_ROOT.render_grill_md(items, sc)", src)
 
 
 class TestSkillSlimDown(unittest.TestCase):
@@ -117,8 +117,8 @@ class TestSkillSlimDown(unittest.TestCase):
 
     def test_grill_cli_friendly_errors(self):
         # 审计 minor-3 回归锁:文件不存在/非 JSON/results 缺失三路径均友好报错 return 2
-        src = open(os.path.join(SK, "scripts", "verify_refs.py"),
-                   encoding="utf-8").read()
+        from _mocks import engine_full_text
+        src = engine_full_text()
         self.assertIn("❌ 报告文件不存在", src)
         self.assertIn("❌ 不是有效的 JSON 报告", src)
         self.assertIn("❌", src) and self.assertIn("无 results 字段", src)
@@ -127,8 +127,8 @@ class TestSkillSlimDown(unittest.TestCase):
         self.assertEqual(seg.count("return 2"), 3)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "5.9.0")
-        self.assertIn("version: 5.9.0",
+        self.assertEqual(vr.VERSION, "6.0.0")
+        self.assertIn("version: 6.0.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
 

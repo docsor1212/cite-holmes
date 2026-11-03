@@ -14,7 +14,9 @@ pubmed_title_reverse_lookup 流；pubmed_pmid_exists 流（依赖 uids 检查）
 约定：mock 按 URL 特征分发（esearch/esummary/其他），各分支独立返回，
 **不共享解析逻辑**（解析错一个分支不影响其他分支的可见性——测试失败信息
 必须能定位到分支）。"""
+import glob
 import json
+import os
 import urllib.parse
 
 
@@ -80,3 +82,16 @@ def fresh_engine_state(vr_module):
     vr_module._NET_STATE["degraded"] = False
     vr_module._NET_STATE.get("fail_hosts", {}).clear()
     vr_module._NET_STATE.get("ok_hosts", set()).clear()
+
+
+def engine_full_text():
+    """v6.0.0 模块化布局适配：引擎源码文本=壳 verify_refs.py + 全部 ch_*.py 拼接。
+
+    「源码含 X 文本」类断言统一走本 helper（单文件时代直接读 verify_refs.py，
+    模块化后文本分布于壳与各层模块——拼接读取保持断言意图不变）。"""
+    import glob as _glob
+    _base = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..", "scripts")
+    parts = [open(os.path.join(_base, "verify_refs.py"), encoding="utf-8").read()]
+    for p in sorted(_glob.glob(os.path.join(_base, "ch_*.py"))):
+        parts.append(open(p, encoding="utf-8").read())
+    return "\n".join(parts)

@@ -5,6 +5,7 @@
 F28 计划工件（校验+渲染+独立模式）/F29 DEEP 档（单调抬升）/F30 信源政策
 （discover 硬过滤+核验注记，绝不改判定）/F31 研究底稿（append-only）。
 全部 sealed（discover 管道 patch _urlopen_retry，零真网）。"""
+from _mocks import engine_full_text  # noqa: E402
 import io
 import json
 import os
@@ -17,7 +18,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SK = os.path.join(HERE, "..")
 sys.path.insert(0, os.path.join(SK, "scripts"))
 import verify_refs as vr  # noqa: E402
-from _mocks import fresh_engine_state  # noqa: E402
+from _mocks import fresh_engine_state, engine_full_text  # noqa: E402
 
 
 class F28_PlanArtifact(unittest.TestCase):
@@ -68,8 +69,7 @@ class F28_PlanArtifact(unittest.TestCase):
 
     def test_help_syntax_matches_parser(self):
         # 审计 P1-1 回归锁：文档示例必须用解析器真语法（竖线分域）
-        src = open(os.path.join(SK, "scripts", "verify_refs.py"),
-                   encoding="utf-8").read()
+        src = engine_full_text()
         self.assertIn("allow-domain=a.org|b.org", src)
         self.assertNotIn("allow-domain=a.org,b.org", src)
 

@@ -149,7 +149,8 @@ class F49_DocTruth(unittest.TestCase):
 
     def test_capability_rows_keep_fake_arxiv_ability(self):
         # 能力描述（真抓假 arXiv ID）与夹具描述（#7）必须区分——能力行保留
-        eng = self._read("scripts", "verify_refs.py")
+        from _mocks import engine_full_text
+        eng = engine_full_text()
         self.assertIn("假 arXiv ID（官方 API 查无）", eng)
 
     def test_adr_clarify_tests_location(self):

@@ -12,6 +12,7 @@ import io
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 import verify_refs as vr  # noqa: E402
+from _mocks import engine_full_text  # noqa: E402
 
 
 def _mk(i, title, doi="", verdict="verified", note=""):
@@ -85,8 +86,7 @@ class TestPresetAndCli(unittest.TestCase):
     """F1:--preset submission 组合预设 + --explain CLI 接线。"""
 
     def test_preset_in_argparse(self):
-        src = open(os.path.join(HERE, "..", "scripts", "verify_refs.py"),
-                   encoding="utf-8").read()
+        src = engine_full_text()
         # v5.2.0 起 preset 双档：submission（投稿终检）+ deep（深度研究档）
         self.assertIn('choices=["submission", "deep"]', src)
         self.assertIn('args.export = args.export or "gbt7714,bibtex,csv"', src)
@@ -96,8 +96,7 @@ class TestPresetAndCli(unittest.TestCase):
                         src.index('if getattr(args, "doctor", False)'))
 
     def test_explain_wiring_after_citescore(self):
-        src = open(os.path.join(HERE, "..", "scripts", "verify_refs.py"),
-                   encoding="utf-8").read()
+        src = engine_full_text()
         self.assertIn('if getattr(args, "explain", None) is not None:', src)
         self.assertIn("explain_ref(target) if target else", src)
 
@@ -166,8 +165,7 @@ class TestDocsUsability(unittest.TestCase):
 
     def test_preset_print_reflects_actual_export(self):
         # 审计 A-1 回归锁:preset 打印回显实际 export 而非无条件宣称三导出
-        src = open(os.path.join(HERE, "..", "scripts", "verify_refs.py"),
-                   encoding="utf-8").read()
+        src = engine_full_text()
         self.assertIn('f"[preset] submission：--strict + --export {args.export} 已组合"', src)
         self.assertIn("绕过磁盘缓存读", src)  # B-1:副作用提示
 
@@ -178,7 +176,7 @@ class TestDocsUsability(unittest.TestCase):
         self.assertEqual(len(vr._ERR_CODE_ZH), 12)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "5.9.0")
+        self.assertEqual(vr.VERSION, "6.0.0")
 
 
 if __name__ == "__main__":

@@ -12,6 +12,7 @@ from unittest import mock
 HERE = os.path.dirname(os.path.abspath(__file__))
 sys.path.insert(0, os.path.join(HERE, "..", "scripts"))
 import verify_refs as vr  # noqa: E402
+from _mocks import engine_full_text  # noqa: E402
 
 
 def R(i, v, **kw):
@@ -267,10 +268,9 @@ class TestEmbedNaNFallback(unittest.TestCase):
 
 class TestVersion(unittest.TestCase):
     def test_t18_version_and_catalog(self):
-        self.assertEqual(vr.VERSION, "5.9.0")
+        self.assertEqual(vr.VERSION, "6.0.0")
         cat = None
-        src = open(os.path.join(HERE, "..", "scripts", "verify_refs.py"),
-                   encoding="utf-8").read()
+        src = engine_full_text()
         self.assertIn("v3.1.0 接入主流程", src)
 
 

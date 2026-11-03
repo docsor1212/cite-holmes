@@ -5,6 +5,7 @@
 评测点名：INDEX 版本标注过期 / 错误码数量 11 与 12 并存 / 安全声明漏报
 用户 URL 检查 / 示例产物版本陈旧 / 触发词缺成组请求示例 / 双副本缺设计记录。
 全部文件读断言，零网络。"""
+from _mocks import engine_full_text  # noqa: E402
 import json
 import os
 import re
@@ -54,9 +55,7 @@ class Consistency_SecurityDeclaration(unittest.TestCase):
         self.assertIn("来源 URL", zh)
         self.assertIn("你提交的来源 URL", sec)
         # 引擎确实会访问用户 URL——声明必须覆盖该行为
-        self.assertIn("check_url(url", open(
-            os.path.join(SK, "scripts", "verify_refs.py"),
-            encoding="utf-8").read())
+        self.assertIn("check_url(url", engine_full_text())
 
     def test_security_md_registries_intact(self):
         sec = open(os.path.join(SK, "references", "security.md"),
@@ -116,12 +115,17 @@ class Consistency_DualCopyByteEqual(unittest.TestCase):
     """审计 P1-1：ADR-0009 承诺的「测试双闸」做实——引擎双副本逐字节一致。"""
 
     def test_engine_copies_byte_identical(self):
+        # v6.0.0：引擎=壳+7 层共 8 文件，双副本逐对逐字节一致（审计 P2-a 扩容）
         import filecmp
-        a = os.path.join(SK, "scripts", "verify_refs.py")
-        b = os.path.join(SK, "mcp", "verify_refs.py")
-        self.assertTrue(os.path.exists(a) and os.path.exists(b))
-        self.assertTrue(filecmp.cmp(a, b, shallow=False),
-                        "scripts/ 与 mcp/ 引擎副本漂移——跑 bash mcp/sync_engine.sh")
+        engine_files = ["verify_refs.py", "ch_text.py", "ch_netio.py",
+                        "ch_registry.py", "ch_semantic.py", "ch_verify.py",
+                        "ch_reports.py", "ch_cli.py"]
+        for name in engine_files:
+            a = os.path.join(SK, "scripts", name)
+            b = os.path.join(SK, "mcp", name)
+            self.assertTrue(os.path.exists(a) and os.path.exists(b), name)
+            self.assertTrue(filecmp.cmp(a, b, shallow=False),
+                            f"{name} 双副本漂移——跑 bash mcp/sync_engine.sh")
 
 
 if __name__ == "__main__":

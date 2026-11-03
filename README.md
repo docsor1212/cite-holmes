@@ -237,6 +237,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v6.0.0** — engine modular layering: the single-file engine becomes a shell plus seven modules (text/constants, transport/state, registry lookups, semantic audit, verdict orchestration, rendering/export, CLI), every file below the static-reader visibility boundary; verdict semantics, public API, CLI and MCP tools unchanged; ADR-0010 documents the decision.
+
 **v5.9.0** — citation-context divergence signals in the scholarly-usage panel (heuristic contrastive-phrasing scan over S2 samples with a conservative threshold; advisory only, never a verdict, zero extra network calls) plus benchmark and ADR documentation truth fixes.
 
 **v5.8.0** — verdict-semantics fidelity: internal exceptions land unverified (never invalid) across CLI and MCP, with actionable notes; MCP docs aligned with the 5-tool reality; retraction-semantics docs refreshed. Zero change to the main verdict paths.

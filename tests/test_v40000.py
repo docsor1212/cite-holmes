@@ -2,6 +2,7 @@
 # -*- coding: utf-8 -*-
 """v4.0.0 测试:版本规则对齐+F1 PubMed 题名反查(Vancouver 医学引用核验)+
 F1-b markdown 参考文献提取+429 可观测。网络路径以 mock 覆盖。"""
+from _mocks import engine_full_text  # noqa: E402
 import importlib.util
 import io
 import json
@@ -15,7 +16,7 @@ HERE = os.path.dirname(os.path.abspath(__file__))
 SK = os.path.join(HERE, "..")
 sys.path.insert(0, os.path.join(SK, "scripts"))
 import verify_refs as vr  # noqa: E402
-from _mocks import NCBIMock, fresh_engine_state  # noqa: E402
+from _mocks import NCBIMock, fresh_engine_state  # noqa: E402, engine_full_text
 
 
 def _mock_esearch(ids):
@@ -145,18 +146,18 @@ class TestMarkdownRefs(unittest.TestCase):
 
 class TestWiringAndVersion(unittest.TestCase):
     def test_verify_one_calls_reverse_lookup(self):
-        src = open(os.path.join(SK, "scripts", "verify_refs.py"), encoding="utf-8").read()
+        src = engine_full_text()
         self.assertIn("pubmed_title_reverse_lookup(", src)
         self.assertIn('"pubmed_reverse"', src)
         self.assertIn("skipped_by_circuit", src)
 
     def test_refs_loader_accepts_md(self):
-        src = open(os.path.join(SK, "scripts", "verify_refs.py"), encoding="utf-8").read()
+        src = engine_full_text()
         self.assertIn('path.lower().endswith((".md", ".markdown"))', src)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "5.9.0")
-        self.assertIn("version: 5.9.0",
+        self.assertEqual(vr.VERSION, "6.0.0")
+        self.assertIn("version: 6.0.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
     def test_version_scheme_rule(self):

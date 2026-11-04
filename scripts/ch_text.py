@@ -30,7 +30,7 @@ def _bind(root):
     _ROOT = root
 
 
-VERSION = "6.0.0"
+VERSION = "6.1.0"
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥

@@ -254,6 +254,94 @@ def render_audit_report(results: list, cd, scorecard: dict) -> str:
     return "\n".join(lines) + "\n"
 
 
+def submission_readiness(results: list, cd=None) -> dict:
+    """v6.1.0 F51 投稿就绪判据（机械层，纯计算）：与 render_audit_report 同源
+    分级口径——P0=invalid（编造嫌疑实锤）/P1=撤稿+不可达/P2=partial+政策注记。
+    ready 判据：P0=0 且撤稿=0 且不可达=0（这些都须先处理）；P2 与完整性
+    问题不阻断（有明确人工复核路径），只列为待办。
+    返回 {"ready": bool, "p0": n, "p1": n, "p2": n, "n_invalid": n,
+          "n_unverified_or_unreachable": n, "blockers": [..], "todos": [..]}。
+    诚实边界：机械层就绪 ≠ 学术就绪（语义支撑/查重/期刊格式不在判据内）——
+    结论行必须随附边界声明。"""
+    p0 = [r for r in results if r.get("verdict") == "invalid"]
+
+    def _is_retr(r):
+        return bool(((r.get("checks") or {}).get("retraction") or {}).get("retracted"))
+
+    retr = [r for r in results if _is_retr(r) and r not in p0]
+    unreach = [r for r in results if r.get("verdict") == "unreachable"
+               and r not in p0 and not _is_retr(r)]
+    p1 = retr + unreach
+    p2 = [r for r in results if r not in p1 and r not in p0
+          and r.get("verdict") != "invalid"
+          and ((r.get("checks", {}) or {}).get("source_policy")
+               or r.get("verdict") == "partial")]
+    blockers, todos = [], []
+    if p0:
+        blockers.append(f"P0 编造嫌疑 {len(p0)} 条（invalid——逐条移除/替换或索要原始出处）")
+    if retr:
+        blockers.append(f"撤稿条目 {len(retr)} 条（必须处理后再投）")
+    if unreach:
+        blockers.append(f"不可达条目 {len(unreach)} 条（复核可访问性后再定）")
+    if p2:
+        todos.append(f"P2 复核项 {len(p2)} 条（partial/政策注记——人工过目）")
+    if cd is not None:
+        if cd.get("n_unbound"):
+            todos.append(f"正文引用未绑定 {cd['n_unbound']} 处（编号/条目对不上）")
+        if cd.get("n_uncited"):
+            todos.append(f"列而未引 {cd.get('n_uncited')} 条（漏引或冗列）")
+    n_open = sum(1 for r in results
+                 if r.get("verdict") in ("unverified", "unreachable"))
+    return {"ready": not blockers, "p0": len(p0), "p1": len(p1), "p2": len(p2),
+            "n_invalid": len(p0), "n_unverified_or_unreachable": n_open,
+            "blockers": blockers, "todos": todos}
+
+
+def build_submission_index(results: list, cd, scorecard: dict,
+                           artifacts: list = None) -> str:
+    """v6.1.0 F51 投稿前审计包 INDEX（--check-paper 总览件）：就绪结论+
+    判定分布+分级计数+包内工件导航+人工边界声明。只装配既有判定与线索，
+    绝不新造判定（ADR-0005 宪法同 render_audit_report）。"""
+    rd = submission_readiness(results, cd)
+    counts = {}
+    for r in results:
+        counts[r.get("verdict")] = counts.get(r.get("verdict"), 0) + 1
+    order = ["verified", "partial", "unreachable", "unverified", "invalid"]
+    dist = "｜".join(f"{_ROOT.VERDICT_ZH.get(v, v)} {counts[v]}"
+                     for v in order if counts.get(v))
+    if rd["ready"]:
+        lines = ["# 投稿前审计包 INDEX", "",
+                 "## 结论：READY（机械层零阻断项）", "",
+                 "- 机械层判定无 P0 编造嫌疑、无撤稿、无未决不可达——引用层"
+                 "不存在已知硬伤。**这不是学术就绪声明**：语义支撑、查重、"
+                 "期刊格式由作者与期刊流程负责；partial/复核项请人工过目。"]
+    else:
+        lines = ["# 投稿前审计包 INDEX", "",
+                 "## 结论：NOT READY（存在机械层阻断项）", "",
+                 "**阻断清单**：",
+                 *[f"- {b}" for b in rd["blockers"]]]
+    lines += ["",
+              f"- 对象：{len(results)} 条引用 · 判定分布：{dist}",
+              f"- CiteScore {scorecard['score']}/100"
+              f"（{scorecard['grade']} 级） · "
+              f"未决（unverified/unreachable）"
+              f"{rd['n_unverified_or_unreachable']} 条", ""]
+    if rd["todos"]:
+        lines += ["**不阻断但建议处理**：", *[f"- {t}" for t in rd["todos"]], ""]
+    if artifacts:
+        lines += ["## 包内工件", "", *[f"- {a}" for a in artifacts], ""]
+    lines += ["## 使用说明", "",
+              "- 本 INDEX 汇总同批生成的核验报告（verify_report）、稿件审计"
+              "分级（audit.md）与参考文献导出；各文件口径一致（同一次核验）。",
+              "- 复跑强制重验加 --refresh-cache；语义支撑判断请用语境层"
+              "（学界用法面板/citation contexts）辅助人工复核。",
+              "", "---",
+              f"生成：{time.strftime('%Y-%m-%d %H:%M')} · cite-holmes "
+              f"v{_ROOT.VERSION} · 机械层口径（存在性/一致性/结构），"
+              "非语义判断。"]
+    return "\n".join(lines) + "\n"
+
+
 def profile_bibliography(results: list) -> dict:
     """v3.11 清单级伪造画像（纯本地，零网络）：LLM 批量编造参考文献表时
     会留下统计指纹——标识符近号成簇、年份过度集中/超前、期刊过度集中。

@@ -306,6 +306,28 @@ Kana（日文）/ Hangul（韩文）。声称题名与注册库登记题名**主
 - **MCP 后端形态**：mcp/README.md 含「作为任何 Deep Research agent 的
   核验后端」接线示例（verify_references 进研究循环、invalid 触发重搜）。
 
+
+## 投稿前审计包（v6.1.0：--check-paper / tools/selfcheck.py）
+
+- **`--check-paper doc.md`**：一条命令产出投稿前审计包——内部组合
+  `--check-document`（同一条稿件解析通路，复用不重造）+ `--audit-mode`
+  （P0/P1/P2 分级）+ `--strict` + GB/T/BibTeX 导出，另出 `<out>.INDEX.md`
+  总览件：机械层投稿就绪结论（READY/NOT READY）+判定分布+阻断清单/
+  待办清单+包内工件导航。
+- **就绪判据**（`submission_readiness`，与 audit 分级同源）：P0=0 且撤稿=0
+  且不可达=0 → READY；P2 与完整性问题不阻断（有明确人工复核路径），
+  只列待办。**诚实边界：机械层就绪 ≠ 学术就绪**——语义支撑、查重、期刊
+  格式由作者与期刊流程负责，READY 结论行强制随附该声明。
+- **组合旗标不改判定语义**：--check-paper 与逐项手敲同批参数的判定/导出/审计报告内容一致
+  （同批口径；各件嵌生成时间戳故非逐字节相同，只多 INDEX 一件）。
+- **`tools/selfcheck.py`**（随包自检）：安装完整性一条命令验证——引擎
+  壳+七层布局导入、核心判定 API 在位、金标集 offline 真跑（3 处预埋伪造
+  全落网+干净条目零误杀，capture 100% 同 docs/benchmark.md 口径）、GB/T
+  导出冒烟；`--mcp` 加测 mcp/ 副本独立加载与 CLI。退出码 0/1，agent 宿主
+  可当安装验证钩子。与 tests/ 的分工：tests/ 是开发侧密封矩阵（不随包，
+  ADR-0001/0010），selfcheck 是用户/宿主侧验证（随包、真跑、无测试框架
+  依赖）。
+
 ## 本地文献库与下一轮种子（v5.5.0：--refs-dir / --next-round）
 
 - **`--refs-dir DIR`**：目录（或单文件）下全部 .json/.bib/.md 按文件名排序一次

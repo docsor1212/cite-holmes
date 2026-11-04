@@ -75,6 +75,13 @@ def main() -> int:
     ap.add_argument("--reviewer", action="store_true",
                     help="v5.4.0 审稿人预演嵌入：核验报告尾部自动追加对抗审查"
                          "问题单（--grill 的同款生成器就地嵌入，免二跳；判定不变）")
+    ap.add_argument("--check-paper", metavar="DOC",
+                    help="v6.1.0 投稿前审计包：完整论文稿件一条命令产出审计包——"
+                         "引用核验报告+稿件审计分级（P0/P1/P2）+GB/T/BibTeX 导出+"
+                         "INDEX 总览（机械层投稿就绪结论 READY/NOT READY+人工"
+                         "边界声明）。= --check-document + --audit-mode + "
+                         "--preset submission 的组合（含 csv 台账），另加 INDEX 装配；"
+                         "与 --check-document 同给时以本旗标为准")
     ap.add_argument("--audit-mode", action="store_true",
                     help="v5.4.0 稿件审计：面向编辑/审稿人/教师输出审计风格报告"
                          "（<out>.audit.md——疑点按 P0 编造嫌疑/P1 高风险线索/P2 "
@@ -189,6 +196,18 @@ def main() -> int:
         if _profile_applied:
             print(f"[profile] 研究档案已应用（{os.path.basename(args.research_profile)}）："
                   + "；".join(_profile_applied) + "——显式旗标优先，判定语义不变")
+    if getattr(args, "check_paper", ""):  # v6.1.0 F51 投稿前审计包：组合旗标不改判定语义
+        args.check_document = args.check_paper  # 同一条稿件解析通路（复用不重造）
+        args.audit_mode = True
+        args.strict = True
+        _user_exp = [x for x in (args.export or "").split(",") if x]
+        for _e in ("gbt7714", "bibtex", "csv"):
+            if _e not in _user_exp:
+                _user_exp.append(_e)
+        args.export = ",".join(_user_exp)
+        print("[check-paper] 投稿前审计包：--check-document + --audit-mode + "
+              "--strict + GB/T/BibTeX 导出已组合，另出 INDEX 就绪总览"
+              "（判定语义与逐项模式完全一致）")
     if getattr(args, "preset", "") == "submission":  # v3.12 投稿终检预设:组合旗标不改判定语义
         args.strict = True
         args.export = args.export or "gbt7714,bibtex,csv"
@@ -684,6 +703,20 @@ def main() -> int:
         with open(_audit_path, "w", encoding="utf-8") as f:
             f.write(_ROOT.render_audit_report(results, cd, scorecard))
         print(f"稿件审计：{_audit_path}（P0 编造嫌疑/P1 高风险/P2 复核 分级+行动清单）")
+    if getattr(args, "check_paper", ""):  # v6.1.0 F51：INDEX 就绪总览（审计包最后一件）
+        _arts = [os.path.basename(args.out), os.path.basename(json_path)]
+        if getattr(args, "audit_mode", False):
+            _arts.append(os.path.basename(_audit_path))
+        for _sfx in ("_GB-T7714.txt", ".bib", ".csv"):
+            _p = args.out.rsplit(".", 1)[0] + _sfx
+            if os.path.exists(_p):
+                _arts.append(os.path.basename(_p))
+        _idx_path = args.out.rsplit(".", 1)[0] + ".INDEX.md"
+        with open(_idx_path, "w", encoding="utf-8") as f:
+            f.write(_ROOT.build_submission_index(results, cd, scorecard, _arts))
+        _rd = _ROOT.submission_readiness(results, cd)
+        print(f"投稿审计包 INDEX：{_idx_path}（就绪结论："
+              f"{'READY——机械层零阻断项' if _rd['ready'] else 'NOT READY——见阻断清单'}）")
 
     _n_crash = sum(1 for r in results
                    if str(r.get("note") or "").startswith("条目处理异常"))

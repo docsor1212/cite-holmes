@@ -57,7 +57,7 @@ class TestV120(unittest.TestCase):
         return rc, calls, doc
 
     def test_version_bumped_120(self):
-        self.assertEqual(vr.VERSION, "6.0.0")
+        self.assertEqual(vr.VERSION, "6.1.0")
 
     def test_disk_cache_hit_second_run_zero_calls(self):
         refs = [{"title": "A Paper About X", "doi": "10.1000/cache-hit"}]
@@ -226,7 +226,8 @@ class TestV120Guardrails(unittest.TestCase):
         # 守卫语义不变：白名单外文件即失败，私有工具仍进不来
         # v5.3.0 再扩容：run_eval.py（留出集评测公开口径 runner，随包分发）
         self.assertEqual(present, {"agentskills_check.py", "check_ta_table.py",
-                                   "build_retraction_cache.py", "run_eval.py"},
+                                   "build_retraction_cache.py", "run_eval.py",
+                                   "selfcheck.py"},
                          "tools/ 只应保留白名单公开工具")
 
 

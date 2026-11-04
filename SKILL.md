@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 6.0.0
+version: 6.1.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -138,7 +138,7 @@ dual-reader header** + **CiteScore** (0-100 + A-D grade) + a one-line
 | Scholarly usage & open access | Semantic Scholar citing contexts show usage distribution (methodology/background/result) + one sample quote; a heuristic divergence signal flags batches where sampled contexts contain contrastive/critical phrasing (advisory banner, never a verdict); `--mailto` also queries Unpaywall for open-access status (X/N free-to-read summary, per-entry license) — enhancement signals only, never a verdict; absent data renders nothing |
 | Deep-research controls | `--plan plan.json --plan-out plan.md` validates & renders an editable research-plan artifact (collaborative planning); `--preset deep` raises the discovery ceiling (25) and timeout floor (20s); `--source-policy journal_only,deny-domain=x.com` curates discovery hits and annotates policy hits at verify (annotation only, never a verdict); `--trace trace.md` appends a per-round audit log; `--research-profile p.json` injects persistent preference defaults (explicit flags win) |
 | EB/OL references (guidelines, labels) | URLs in [EB/OL]-style entries are extracted (when no stronger identifier exists) and routed through reachability + source-tier checks; when such a reference lands partial, the page <title> is cross-checked against the claim and a match is recorded as existence evidence in the workpaper |
-| Reference-list completeness | `--check-document` audits orphans (listed but never cited — a writing-integrity advisory, never a verdict) and coverage; one-file mode: pass the document alone and the reference section is auto-extracted; `--audit-mode` renders an editor-facing audit report (P0 fabrication suspects / P1 high-risk leads / P2 review items + action checklist); `--refs-dir` batch-loads a local library folder into one batch; `--next-round report.json` regenerates a retry skeleton from unresolved entries (invalid never recycled) |
+| Reference-list completeness | `--check-document` audits orphans (listed but never cited — a writing-integrity advisory, never a verdict) and coverage; one-file mode: pass the document alone and the reference section is auto-extracted; `--audit-mode` renders an editor-facing audit report (P0 fabrication suspects / P1 high-risk leads / P2 review items + action checklist); `--refs-dir` batch-loads a local library folder into one batch; `--next-round report.json` regenerates a retry skeleton from unresolved entries (invalid never recycled); `--check-paper doc.md` runs the whole pre-submission audit package in one command (verify + audit tiers + GB/T/BibTeX export + INDEX with a mechanical READY/NOT-READY verdict and explicit human-review boundary) |
 | Wayback archive links | attached to dead links automatically |
 | Completeness scoring | how many export fields the registry CSL can back-fill |
 | Speed | 20-ref mixed list ≈18s at `--workers 4` (default), ≈7s cache-warm, ≈47s serial — measured table: `references/verification-details.md` |

@@ -237,6 +237,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v6.1.0** — pre-submission audit package: `--check-paper doc.md` produces the verification report, tiered audit, GB/T/BibTeX/CSV exports and an INDEX overview with a mechanical READY/NOT-READY verdict (human-review boundary always attached); shipped `tools/selfcheck.py` install self-check for agent hosts.
+
 **v6.0.0** — engine modular layering: the single-file engine becomes a shell plus seven modules (text/constants, transport/state, registry lookups, semantic audit, verdict orchestration, rendering/export, CLI), every file below the static-reader visibility boundary; verdict semantics, public API, CLI and MCP tools unchanged; ADR-0010 documents the decision.
 
 **v5.9.0** — citation-context divergence signals in the scholarly-usage panel (heuristic contrastive-phrasing scan over S2 samples with a conservative threshold; advisory only, never a verdict, zero extra network calls) plus benchmark and ADR documentation truth fixes.

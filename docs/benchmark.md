@@ -41,6 +41,27 @@ python tools/run_eval.py --refs your_labeled.json --net   # 自备标注集 · �
 |---|---|---|---|---|---|
 | v5.3.0（2026-10-26 实测） | 内置金标 · offline | 100%（3/3） | 33%（1/3） | 0%（0/5） | partial 7 · invalid 1 |
 
+## 独立留出集（v6.2.0：examples/holdout_real.json，16 条）
+
+内置金标集（8 条）之外的第二评测面：**clean 条目经真实网络逐条核验后入集**
+（2026-11-06 直连注册库实测，构造中凭记忆书写的 8 条 DOI 因真网核验不过被
+全部剔除——真实数据铁律的现场实证）。口径与内置金标一致，复现命令：
+
+```bash
+python tools/run_eval.py --refs examples/holdout_real.json          # offline
+python tools/run_eval.py --refs examples/holdout_real.json --net    # 真网
+```
+
+| 口径 | capture | strict_capture | false_kill | 备注 |
+|---|---|---|---|---|
+| offline（2026-11-06 实测） | 100%（8/8） | 25%（2/8） | 0%（0/8） | 裸条目/泛题名结构层实锤 |
+| net（2026-11-06 实测） | 100%（8/8） | 62.5%（5/8） | 0%（0/8） | 错配/拼接/假 arXiv/良构假 DOI 全实锤 |
+
+形态覆盖：良构假 DOI/编造 URL/裸条目/泛题名/真题名配假 DOI（错引）/真 DOI
+配错 PMID（拼接）/假 arXiv×2——8 种伪造形态。**诚实边界**：预埋位置公开
+（边界 4 继续适用）；net 口径数字随注册库漂移（边界 2）；clean 集真网核验
+状态有时效性（站点可达性变化属 unreachable 诚实态，非误杀）。
+
 ## 诚实边界（必读）
 
 1. **offline 口径只测结构层**：良构的假 DOI/假 arXiv ID（格式合法）与

@@ -344,8 +344,15 @@ def main() -> int:
     if getattr(args, "demo", False) and not args.refs and not args.claims:
         _demo = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                              "..", "examples", "demo_refs.json")
-        with open(_demo, encoding="utf-8") as f:
-            refs = json.load(f)
+        try:
+            with open(_demo, encoding="utf-8") as f:
+                refs = json.load(f)
+        except OSError:
+            # v6.2.0 安装态（uvx/pip wheel）不随带 examples/——给可操作指引而非堆栈
+            print("❌ --demo 样例文件不在当前安装形态中（wheel 分发仅含引擎与 MCP 层）。"
+                  "替代：用 --refs 指向自己的引用清单（JSON/BibTeX 均可），或从 "
+                  "GitHub 仓库 docsor1212/cite-holmes 获取完整目录后跑 --demo。")
+            return 2
         print(f"[demo] 内置样例清单 {len(refs)} 条（含 3 处预埋伪造）——体验五态判定全流程")
     if (getattr(args, "discover", "") and not args.refs
             and not args.claims and not refs):

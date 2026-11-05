@@ -38,4 +38,15 @@ mods = [n for n in ("ch_text", "ch_netio", "ch_registry") if hasattr(vr, n)]
 assert len(mods) == 3, f"mcp 壳重导出缺层: {mods}"
 print("[sync_engine] mcp 副本独立加载自检 PASS (VERSION %s)" % vr.VERSION)
 PYEOF
+# F54 wheel 清单门：pyproject include ⊇ mcp/ 全部 py 文件（防新模块漏打包）
+python3 - "$ROOT" <<'PYEOF2'
+import glob, os, sys, tomllib
+root = sys.argv[1]
+d = tomllib.load(open(os.path.join(root, "mcp", "pyproject.toml"), "rb"))
+inc = set(d["tool"]["hatch"]["build"]["targets"]["wheel"]["include"])
+actual = {os.path.basename(p) for p in glob.glob(os.path.join(root, "mcp", "*.py"))}
+missing = actual - inc
+assert not missing, f"pyproject wheel include 缺 {sorted(missing)}——uvx/pip 安装将崩（F54 教训）"
+print("[sync_engine] wheel 清单门 PASS（include ⊇ %d 个 mcp py 文件）" % len(actual))
+PYEOF2
 echo "[sync_engine] PASS: 壳+7 层全部同步（8 文件逐字节一致, VERSION $V1）"

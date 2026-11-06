@@ -268,7 +268,7 @@ class TestEmbedNaNFallback(unittest.TestCase):
 
 class TestVersion(unittest.TestCase):
     def test_t18_version_and_catalog(self):
-        self.assertEqual(vr.VERSION, "6.2.0")
+        self.assertEqual(vr.VERSION, "6.3.0")
         cat = None
         src = engine_full_text()
         self.assertIn("v3.1.0 接入主流程", src)

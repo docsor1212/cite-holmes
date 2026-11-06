@@ -237,6 +237,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v6.3.0** — `tools/netcheck.py` live-net stability self-check: seven-registry probes, live verification rings (freshly fetched fixtures), four-form mine matrix with zero clean-kill; two-tier verification system with the shipped offline selfcheck; the gate is content-bound against idle-pass.
+
 **v6.2.0** — MCP wheel manifest completeness fix (seven engine layers now packaged; standalone installs verified working; install-mode --demo degrades gracefully) plus an independent holdout eval set (16 live-verified entries, six fabrication forms, zero false-kill offline and live-net) registered in the benchmark page.
 
 **v6.1.0** — pre-submission audit package: `--check-paper doc.md` produces the verification report, tiered audit, GB/T/BibTeX/CSV exports and an INDEX overview with a mechanical READY/NOT-READY verdict (human-review boundary always attached); shipped `tools/selfcheck.py` install self-check for agent hosts.

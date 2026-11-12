@@ -62,6 +62,16 @@ python tools/run_eval.py --refs examples/holdout_real.json --net    # 真网
 （边界 4 继续适用）；net 口径数字随注册库漂移（边界 2）；clean 集真网核验
 状态有时效性（站点可达性变化属 unreachable 诚实态，非误杀）。
 
+## 元数据忠实度腐蚀集（v6.4.0：examples/holdout_fidelity.json，6 条）
+
+M5 忠实度分级的留出评测面：真实 DOI 的受控腐蚀（exact 原样对照/minor 字段级
+漂移[major/major 窗见 planted_notes]/major 题名改写），预埋标签公开。真网校准
+三轮（2026-11-13）：**年份±1 属引擎设计相容（非漂移）**；轻改写 sim 仍 >0.82
+一致区（窗上界实证）；批内缓存按 DOI 复用判定（既有设计）——**腐蚀条目须单条
+独立跑批**（--no-cache 单跑）。实测（v6.4.0 代码+真网）：6/6 分级命中
+（#4 sim 0.78→minor、#5 sim 0.65→major、原样三条 sim 1.00→无标签），腐蚀
+全部落 partial 非 invalid（"完全编造"由 invalid 独占）。判定语义零改动。
+
 ## 诚实边界（必读）
 
 1. **offline 口径只测结构层**：良构的假 DOI/假 arXiv ID（格式合法）与

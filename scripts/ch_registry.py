@@ -293,7 +293,17 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
         except (TypeError, ValueError):
             pass
     if title and sim < 0.82:
-        return "partial", f"DOI 元数据标题相似度 {sim:.2f}，建议人工复核{year_note}{jnote}{anote}{prov}", True, csl
+        # v6.4.0 M5 忠实度分级（判定零改动——纯标签透出）：partial 内区分
+        # 元数据漂移幅度（minor=接近登记[0.68-0.82]，多为年份/拼写/更名级；
+        # major=题名明显偏差[0.50-0.68]仍非编造），对齐 CITECHECK 行业前沿
+        # 的 Exact/Minor/Major 分层；"完全编造"仍由 invalid 独占。
+        _fid = "minor" if sim >= 0.68 else "major"
+        return "partial", (f"[元数据漂移:{_fid}] DOI 元数据标题相似度 {sim:.2f}，"
+                           f"建议人工复核{year_note}{jnote}{anote}{prov}"), True, csl
+    if jadj or aadj:
+        # 期刊更名/作者变体级偏差=minor（题名一致，字段级漂移）
+        return (jadj or aadj), (f"[元数据漂移:minor] DOI 元数据核验一致（相似度 "
+                                f"{sim:.2f}）{year_note}{jnote}{anote}{prov}"), True, csl
     return (jadj or aadj), f"DOI 元数据核验一致（相似度 {sim:.2f}）{year_note}{jnote}{anote}{prov}", True, csl
 
 
@@ -728,7 +738,9 @@ def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float
             return "invalid", (f"PMID 登记标题相似度仅 {sim:.2f}（登记为《{mt[:60]}》）"
                                "→ 真 PMID 假标题，疑似拼接伪造"), False
         if sim < 0.82:
-            return "partial", (f"PMID 登记标题相似度 {sim:.2f}：《{mt[:60]}》，建议人工复核"), False
+            _fid = "minor" if sim >= 0.68 else "major"  # M5 同规
+            return "partial", (f"[元数据漂移:{_fid}] PMID 登记标题相似度 {sim:.2f}："
+                               f"《{mt[:60]}》，建议人工复核"), False
         matched = True
     if source:
         reg_j = item.get("fulljournalname") or item.get("source") or ""
@@ -738,6 +750,28 @@ def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float
                                "降 partial 人工复核"), matched
     return "", "PMID 元数据核验一致" + (f"：《{mt[:50]}》" if mt else ""), matched
 
+
+
+def _alias_subset(claimed: str, actual: str) -> bool:
+    """v6.3.1 title-alias-false-invalid 第3形态修复（探针 2026-11-13 抓包）：
+    fallback 路径的字符级 difflib 相似度对截短/别名题名系统性低估（声称题名是登记
+    题名的前缀/缩写/重排，如 "STOP: Self-Taught Optimizer" vs 登记
+    "Self-Taught Optimizer (STOP): Recursively Self-Improving Code"）。
+    声称题名有效 token 是登记题名 token 的子集（或反之）=「非编造」的充分条件
+    → 判 partial 转人工，不再误判 invalid。主 API 路径自 v4.0.1 起已有别名
+    容忍，本函数将同一保护对齐到着陆页 fallback 路径（arXiv API 超时触发率不低）。
+    至少 2 个有效 token 才认定，防单词偶然命中。"""
+    STOP = {"a", "an", "the", "of", "for", "and", "or", "on", "in", "to",
+            "with", "via", "using", "towards", "toward"}
+
+    def toks(s):
+        return {t for t in re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ",
+                                  (s or "").lower()).split()
+                if t not in STOP and len(t) >= 2}
+    ct, at = toks(claimed), toks(actual)
+    if len(ct) < 2 or not at:
+        return False
+    return ct.issubset(at) or at.issubset(ct)
 
 
 def _arxiv_landing_fallback(arxiv_id: str, title: str, timeout: float,
@@ -765,7 +799,10 @@ def _arxiv_landing_fallback(arxiv_id: str, title: str, timeout: float,
                  "Accept": "text/html"})
     html_text, err = None, ""
     try:
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
+        # v6.3.1 改走 _urlopen_retry：继承代理自愈（代理在场且传输失败→无代理
+        # 直连一试），HTTPError 语义不变（仍即时上抛由本函数分类记账）
+        with _ROOT._urlopen_retry(req, timeout=timeout, attempts=2,
+                                  backoff=1.0) as resp:
             html_text = resp.read().decode("utf-8", "ignore")
         _ROOT._cb_record(landing, False)
     except urllib.error.HTTPError as e:
@@ -794,6 +831,11 @@ def _arxiv_landing_fallback(arxiv_id: str, title: str, timeout: float,
     sim = difflib.SequenceMatcher(None, (title or "").lower(),
                                   page_title.lower()).ratio()
     if title and sim < 0.50:
+        if _alias_subset(title, page_title):
+            return "partial", (f"arXiv 元数据 API 失败（{api_err}），官方着陆页标题相似度"
+                               f"{sim:.2f} 但声称题名是登记题名的截短/别名（token 子集"
+                               "关系）→ 非编造，降级人工复核"
+                               f"（arXiv 实际为《{page_title[:60]}》）"), True
         return "invalid", (f"arXiv 元数据 API 失败（{api_err}），官方着陆页标题相似度"
                            f"仅 {sim:.2f} → ID 指向的不是这篇论文，疑似错引"
                            f"（arXiv 实际为《{page_title[:60]}》）"), True
@@ -828,7 +870,9 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
             api_url,
             headers={"User-Agent": ua_rot[min(attempt, 1)]})
         try:
-            with urllib.request.urlopen(req, timeout=timeout) as resp:
+            # v6.3.1 同着陆页：走 _urlopen_retry 拿代理自愈（HTTPError 仍即时上抛）
+            with _ROOT._urlopen_retry(req, timeout=timeout, attempts=2,
+                                      backoff=1.0) as resp:
                 xml_text = resp.read().decode("utf-8", "ignore")
             fetch_err = ""
             _ROOT._cb_record(api_url, False)
@@ -901,6 +945,13 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
     if latest_v and latest_v > 1:
         if claimed_v is None:
             ver_note = f"；注意：该论文已有 {latest_v} 个修订版本，引用未指定版本（arXiv 默认解析最新版）"
+            if _ROOT._OPTS.get("require_version"):
+                # v6.4.0 M3 严格档（默认 off 零行为变化）：多版本文且未指定版本
+                # → partial 封顶（引用语义漂移——Attention 7 版实测提示）。判定
+                # 走既有 partial 通路（sim 已一致时仅降级注记），绝不判 invalid
+                #（未指定版本≠编造）。
+                ver_note += "；--require-version 严格档：引用语义随版本漂移，降 partial 人工确认版本"
+                return "partial", (f"arXiv 元数据核验一致{ver_note}"), True
         elif claimed_v < latest_v:
             ver_note = (f"；注意：引用指向 v{claimed_v}，最新版为 v{latest_v}"
                         "——请确认引用的是预期版本（旧版可能含未修正内容）")
@@ -1078,6 +1129,7 @@ def check_url(url: str, timeout: float, retries: int = 1) -> tuple:
         })
         opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler())
         transient = False
+        use_direct = False
         for method in ("HEAD", "GET"):
             try:
                 req.method = method
@@ -1094,6 +1146,30 @@ def check_url(url: str, timeout: float, retries: int = 1) -> tuple:
             except (urllib.error.URLError, TimeoutError, OSError) as e:
                 if method == "HEAD":
                     continue
+                # v6.3.1 代理自愈：环境有代理且 GET 传输失败 → 无代理直连重试一次。
+                # 必须重建 Request——代理路径已把代理地址烘焙进原 req.host
+                # （单变量实验实证：复用污染对象时换无代理 opener 仍连死代理）。
+                if (not use_direct) and urllib.request.getproxies():
+                    use_direct = True
+                    direct_req = urllib.request.Request(url, method="GET", headers={
+                        "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION};"
+                                      " +verified-deep-research)",
+                        "Accept": "*/*"})
+                    direct_opener = urllib.request.build_opener(
+                        urllib.request.HTTPRedirectHandler(),
+                        urllib.request.ProxyHandler({}))
+                    try:
+                        with direct_opener.open(direct_req, timeout=timeout) as resp:
+                            _ROOT._cb_record(url, False)
+                            return True, resp.status, (
+                                f"GET {resp.status}（代理栈故障，无代理直连自愈）")
+                    except urllib.error.HTTPError as e2:
+                        _ROOT._cb_record(url, False)  # 站点有响应≠传输失败
+                        if e2.code == 429:
+                            return True, 429, "HTTP 429（反爬限流，站点实际存在）"
+                        return False, e2.code, f"HTTP {e2.code}（站点拒绝或页面不存在）"
+                    except Exception:
+                        pass  # 直连也失败 → 落回原 transient 流程如实报错
                 transient = True
                 msg = str(e)
                 if isinstance(e, TimeoutError) or "timed out" in msg or "timeout" in msg.lower():
@@ -1235,6 +1311,36 @@ def crossref_retraction_check(doi: str, timeout: float) -> dict:
         return dict(failed)
 
 
+
+def _openalex_fetch(url: str, timeout: float, ua: str):
+    """v6.4.0 M2：OpenAlex 拉取（429 单次退避重试）。无 key 每日 100 credits
+    限流实测高频（doctor 已提示 key 制）——遇 429 尊重 Retry-After（封顶 5s）
+    退避重试一次，避免把限流抖动当「未收录」降级；仍 429 则原样抛给调用方
+    既有诚实路径。断路器由调用方负责（本助手不触碰 _cb_*）。"""
+    last = None
+    for attempt in (0, 1):
+        req = urllib.request.Request(url, headers={"User-Agent": ua})
+        try:
+            with urllib.request.urlopen(req, timeout=timeout) as resp:
+                return json.loads(resp.read().decode("utf-8", "ignore"))
+        except urllib.error.HTTPError as e:
+            if e.code == 429 and attempt == 0:
+                ra = 2.0
+                try:
+                    if e.headers and e.headers.get("Retry-After"):
+                        ra = min(5.0, max(1.0, float(e.headers["Retry-After"])))
+                except (TypeError, ValueError):
+                    pass
+                time.sleep(ra)
+                last = e
+                continue
+            raise
+        except Exception as e:
+            last = e
+            break
+    raise last
+
+
 def openalex_works_lookup(title: str, year, timeout: float) -> tuple:
     """v4.3.0 OpenAlex 书目检索升级版：确认存在性 + 候选 DOI 锚。
 
@@ -1258,12 +1364,11 @@ def openalex_works_lookup(title: str, year, timeout: float) -> tuple:
     try:
         if _ROOT._cb_open(url):
             return "", False, ""
-        req = urllib.request.Request(
-            url, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
-        with urllib.request.urlopen(req, timeout=timeout) as resp:
-            _ROOT._cb_record(url, False)
-            results = (json.loads(resp.read().decode("utf-8", "ignore"))
-                       or {}).get("results") or []
+        results = (_ROOT._openalex_fetch(
+            url, timeout,
+            f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research")
+            or {}).get("results") or []
+        _ROOT._cb_record(url, False)
         if not results:
             return "OpenAlex 未检索到明显匹配条目（可能未被收录，不作为编造依据）", False, ""
         try:

@@ -237,6 +237,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v6.4.0** — TLS-fingerprint downgrade retry in the transport layer (fixes CDN-site unreachable misjudgements; request object rebuilt on the downgrade round) and metadata-fidelity grading annotations within partial (minor/major drift, verdict semantics untouched) with a live-calibrated corrosion holdout set; OpenAlex 429 backoff retry; `--require-version` strict tier (default off); `tools/run_tests.sh` suite entry; netcheck CDN probes.
+
 **v6.3.0** — `tools/netcheck.py` live-net stability self-check: seven-registry probes, live verification rings (freshly fetched fixtures), four-form mine matrix with zero clean-kill; two-tier verification system with the shipped offline selfcheck; the gate is content-bound against idle-pass.
 
 **v6.2.0** — MCP wheel manifest completeness fix (seven engine layers now packaged; standalone installs verified working; install-mode --demo degrades gracefully) plus an independent holdout eval set (16 live-verified entries, six fabrication forms, zero false-kill offline and live-net) registered in the benchmark page.

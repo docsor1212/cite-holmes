@@ -154,6 +154,27 @@ def _ncbi_rate_wait():
         _NCBI_LAST[0] = time.time()
 
 
+_TLS_STALL_MARKERS = ("timed out", "timeout", "handshake", "ssl", "tls",
+                      "connection reset", "eof occurred")
+_TLS12_CTX = [None]
+
+
+def _tls12_context():
+    """v6.4.0 M1：TLS1.2 降级上下文（懒构建，全局复用）。测试线实测（两度
+    复现）：OpenSSL 3.0.13 与 Cloudflare TLS1.3 指纹交互对 anthropic.com/
+    claude.com 必握手超时，TLS1.2 秒通——EB/OL 引用指向此类 CDN 站会被
+    误判 unreachable。仅在 _urlopen_retry 的 TLS 特征异常后降级一试。"""
+    if _TLS12_CTX[0] is None:
+        import ssl
+        ctx = ssl.create_default_context()
+        try:
+            ctx.options |= ssl.OP_NO_TLSv1_3
+        except AttributeError:
+            pass  # 老版本 OpenSSL 无该旗标=无 TLS1.3 可禁
+        _TLS12_CTX[0] = ctx
+    return _TLS12_CTX[0]
+
+
 def _urlopen_retry(req, timeout: float, attempts: int = 3, backoff: float = 1.5):
     """v4.1.0 传输层重试（与 pmid_doi_crosscheck v3.3.0 同标准，收拢为公共助手）。
 
@@ -161,17 +182,83 @@ def _urlopen_retry(req, timeout: float, attempts: int = 3, backoff: float = 1.5)
     HTTPError 是服务器已应答（429/404/403），绝不重试，由调用方走各自可观测路径。
     全部 attempts 耗尽后抛出最后一次异常——调用方负责把「传输失败」与「查无」
     区分开（2026-10-16 实测事故：传输失败曾被当成查无 → 12+ 条真文献被报 unverified）。
+
+    v6.3.1 代理自愈：环境带代理变量且传输失败时，先用无代理 opener 直连试一次
+    再进入常规退避（2026-11-13 实测：代理栈故障期 18/18 全 unreachable、CiteScore
+    假 0/D 两连发，而同环境直连健康——代理在场≠代理可用，自愈优于把 unreachable
+    全量甩给人工复核）。
+
+    v6.4.0 M1 TLS 降级（测试线 P0）：传输异常含 TLS 指纹特征词（超时/握手/
+    ssl）且 https 目标时，用 OP_NO_TLSv1_3 上下文重试一次——OpenSSL 3.0.13
+    与 Cloudflare TLS1.3 指纹交互对部分 CDN 站必超时（TLS1.2 秒通），不降级
+    会把可达站误判 unreachable。判定语义零改动（失败仍按传输失败上抛）。
     """
     last_exc = None
-    for attempt in range(attempts):
+    use_direct = False
+    tls12_tried = False  # M1：TLS1.2 降级重试只试一次（防降级路径循环）
+    tries = 0
+    max_tries = attempts + (1 if urllib.request.getproxies() else 0)
+    while tries < max_tries:
+        tries += 1
         try:
+            if use_direct:
+                import os
+                # 陷阱（2026-11-13 单变量实验实证）：代理路径首轮会把代理地址
+                # 烘焙进 Request.host（如 127.0.0.1:7890）——复用被污染对象时
+                # 即使换了无代理 opener 仍连死代理。直连必须重建请求对象。
+                direct_req = urllib.request.Request(
+                    req.full_url, data=req.data,
+                    headers=dict(req.header_items()),
+                    method=req.get_method())
+                # 走 urlopen（而非自建 opener.open）保持与调用方/测试同一入口：
+                # ①测试对 urllib.request.urlopen 的统一 mock 在直连分支同样生效
+                #   （自建 opener.open 会绕过 mock 打真网——9 用例回归实证）；
+                # ②清代理 env + 装无代理默认 opener 实现"urlopen 但直连"。
+                # install_opener 全局副作用=本进程此后默认直连：代理栈已证实
+                # 故障的会话里这是期望行为（会话级自愈）。
+                _saved = {k: os.environ.pop(k) for k in
+                          ("http_proxy", "https_proxy", "HTTP_PROXY",
+                           "HTTPS_PROXY", "all_proxy", "ALL_PROXY")
+                          if k in os.environ}
+                try:
+                    urllib.request.install_opener(urllib.request.build_opener(
+                        urllib.request.ProxyHandler({})))
+                    return urllib.request.urlopen(direct_req, timeout=timeout)
+                finally:
+                    os.environ.update(_saved)
             return urllib.request.urlopen(req, timeout=timeout)
         except urllib.error.HTTPError:
             raise
         except Exception as e:
             last_exc = e
-            if attempt + 1 < attempts:
-                time.sleep(backoff * (attempt + 1))
+            if not use_direct and urllib.request.getproxies():
+                use_direct = True  # 代理在场且传输失败 → 立即无代理直连一试
+                continue
+            # v6.4.0 M1（测试线 P0）：TLS 指纹性超时 → TLS1.2 上下文重试一次。
+            # 实测（测试线 2026-11-13，两度复现）：OpenSSL 3.0.13 与 Cloudflare
+            # TLS1.3 指纹交互对 anthropic.com/claude.com 必握手超时（TLS1.2 秒通、
+            # node undici 不受影响）——EB/OL 引用指向此类 CDN 站会被误判
+            # unreachable。特征词命中即降级一试；mock 签名不含 context 时
+            # TypeError 回退常规重试（密封兼容）。
+            if (not tls12_tried and str(getattr(req, "full_url", "")).startswith("https")
+                    and any(m in str(e).lower() for m in _TLS_STALL_MARKERS)):
+                tls12_tried = True
+                try:
+                    # 对抗审计观察（v6.4.0）：代理路径可能把代理地址烘焙进
+                    # req.host（v6.3.1 注释已立档的陷阱）——降级轮与直连自愈
+                    # 分支同刀：重建请求对象，防降级轮连死代理。
+                    tls_req = urllib.request.Request(
+                        req.full_url, data=req.data,
+                        headers=dict(req.header_items()),
+                        method=req.get_method())
+                    return urllib.request.urlopen(tls_req, timeout=timeout,
+                                                  context=_tls12_context())
+                except TypeError:
+                    pass  # 密封 mock 严格签名——回退常规退避路径
+                except Exception as e2:
+                    last_exc = e2  # 降级一试仍败：原样进入退避（不掩盖真实失败）
+            if tries < max_tries:
+                time.sleep(backoff * tries)
     raise last_exc
 
 

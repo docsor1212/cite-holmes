@@ -147,6 +147,10 @@ def main() -> int:
                     help="傻瓜模式：自动识别医学引用启用医学预设，验证后自动导出 bibtex+csv，无需其他参数")
     ap.add_argument("--openalex-key", default="",
                     help="OpenAlex API key（2026-02 起生产调用需要；也可用环境变量 OPENALEX_API_KEY）")
+    ap.add_argument("--require-version", action="store_true",
+                    help="v6.4.0 M3 严格档：多修订版本 arXiv 引用未指定版本号时"
+                         "降 partial 人工确认版本（默认 off——仅注记不降级；"
+                         "未指定版本绝不判 invalid）")
     ap.add_argument("--judge-url", default="",
                     help="L4 外置裁判端点（OpenAI 兼容 /chat/completions,如 ollama/llama-server;"
                          "自备模型,cite-holmes 只出框架——零依赖不破）")
@@ -327,6 +331,7 @@ def main() -> int:
     args.cache_path = os.path.expanduser(args.cache_path)
     _ROOT._OPTS.update({
         "openalex_key": args.openalex_key or os.environ.get("OPENALEX_API_KEY", ""),
+        "require_version": bool(args.require_version),
         "s2_key": args.s2_key or os.environ.get("S2_API_KEY", ""),
         "ncbi_key": args.ncbi_key or os.environ.get("NCBI_API_KEY", ""),
         "retraction_cache": args.retraction_cache.strip(),

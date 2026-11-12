@@ -73,6 +73,9 @@ def n1_probes():
         ("OpenAlex", "https://api.openalex.org/works?search=bronchiolitis&per-page=1", 200,),
         ("Semantic Scholar", "https://api.semanticscholar.org/graph/v1/paper/DOI:10.1542/peds.2006-2223?fields=title", 200, 429),
         ("Unpaywall", "https://api.unpaywall.org/v2/10.1542/peds.2006-2223?email=netcheck@docsor.cn", 200, 404),
+        # M1 闸门：Cloudflare TLS1.3 指纹类 CDN 站（OpenSSL 3.0.13 交互实测
+        # 对此类站 TLS 握手超时——引擎 TLS1.2 降级重试的靶面，403 反爬也算通）
+        ("Cloudflare CDN", "https://www.anthropic.com/engineering/equipping-agents-for-the-real-world-with-agent-skills", 200, 403),
     ]
     ok, names = 0, []
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
@@ -191,7 +194,7 @@ def main():
     print(f"cite-holmes netcheck（真网稳定性自检）——{SK}")
     with tempfile.TemporaryDirectory() as td:
         ok, total = n1_probes()
-        check("N1 注册库探针 ≥5/7 可达", ok >= 5, f"实测 {ok}/{total}")
+        check("N1 注册库探针 ≥6/8 可达", ok >= 6, f"实测 {ok}/{total}")
         if not args.quick:
             res, err = n2_pubmed_ring(td)
             if res is None:

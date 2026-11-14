@@ -182,9 +182,13 @@ class F53_McpToolEnumSync(unittest.TestCase):
         self.assertEqual(len(impls) + len(handlers), 5,
                          f"server.py 公开面变化（{len(impls)}+{len(handlers)}）"
                          "——同步更新 SKILL 枚举与本锁")
-        skill_zh = open(os.path.join(SK, "SKILL_ZH.md"),
-                        encoding="utf-8").read()
+        # v6.5.0 F57 包态自足：随包子集会进发布包，而包内无 SKILL_ZH.md
+        # （打包器排除；SH 包 SKILL.md 即中文版）——仓库态查双语文案，
+        # 包态回退单 SKILL.md 查一遍
         skill_en = open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read()
+        zh_path = os.path.join(SK, "SKILL_ZH.md")
+        skill_zh = (open(zh_path, encoding="utf-8").read()
+                    if os.path.isfile(zh_path) else skill_en)
         for n in ("verify_references", "discover_references", "check_document",
                   "build_review_kit", "explain_verdict"):
             self.assertIn(f"`{n}`", skill_zh, n)

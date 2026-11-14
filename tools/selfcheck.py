@@ -1,17 +1,20 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""cite-holmes 随包自检（v6.1.0 F52）——安装完整性验证，一条命令：
+"""cite-holmes 随包自检（v6.1.0 F52；v6.5.0 F57 扩展）——安装完整性验证，一条命令：
 
     python3 tools/selfcheck.py            # 标准自检（零外呼，offline 口径）
     python3 tools/selfcheck.py --mcp      # 加测 mcp/ 嵌入式副本独立加载+CLI
+    python3 tools/selfcheck.py --tests    # 加测随包 sealed 测试子集（F57：
+                                          #   run_tests.sh --shipped，清单 tests/shipped_manifest.json）
 
 验证四件事：①引擎可导入（壳+七层模块化布局完整）②核心判定 API 在位
 （五态判定/导出/审计包）③内置金标集 offline 全流程真跑且伪造全数落网
 （capture 100% 判据——与 docs/benchmark.md 同口径）④GB/T 导出通路冒烟。
 退出码 0=自检通过；1=任一失败（agent 宿主可当安装验证钩子）。
 
-与 tests/ 的分工：tests/ 是开发侧密封矩阵（不随包分发，见 ADR-0001/0010）；
-本脚本是用户/宿主侧安装验证（随包、真跑、无测试框架依赖）。"""
+与 tests/ 的分工（ADR-0011 修订 ADR-0010 边界）：随包 sealed 子集
+（tests/shipped_manifest.json 清单）随包分发可复验；全量回归矩阵仍为
+开发侧。本脚本是用户/宿主侧安装验证（随包、真跑、无测试框架依赖）。"""
 
 import argparse
 import json
@@ -108,10 +111,23 @@ def t_mcp_standalone():
         assert rc.returncode in (0, 1), f"mcp 副本 CLI rc={rc.returncode}"
 
 
+def t_shipped_tests():
+    # F57：随包 sealed 子集真跑（清单缺文件=部分拷贝损坏，直接 FAIL）
+    rt = os.path.join(SK, "tools", "run_tests.sh")
+    assert os.path.isfile(rt), "tools/run_tests.sh 缺失"
+    rc = subprocess.run(["bash", rt, "--shipped"],
+                        capture_output=True, text=True, timeout=600)
+    assert rc.returncode == 0, \
+        f"随包子集 rc={rc.returncode}\n{rc.stdout[-600:]}{rc.stderr[-200:]}"
+    assert "RESULT: PASS" in rc.stdout, rc.stdout[-300:]
+
+
 def main():
     ap = argparse.ArgumentParser(description="cite-holmes 安装自检（随包）")
     ap.add_argument("--mcp", action="store_true",
                     help="加测 mcp/ 嵌入式副本独立加载与 CLI（uvx/子目录分发形态）")
+    ap.add_argument("--tests", action="store_true",
+                    help="加测随包 sealed 测试子集（F57；run_tests.sh --shipped）")
     args = ap.parse_args()
     print(f"cite-holmes 自检（v? 引擎版本见下）——{SK}")
     check("引擎导入（壳+七层布局）", t_engine_import)
@@ -123,6 +139,8 @@ def main():
     check("GB/T 导出通路冒烟", t_gbt_export_smoke)
     if args.mcp:
         check("mcp 副本独立加载+CLI", t_mcp_standalone)
+    if args.tests:
+        check("随包 sealed 测试子集（F57）", t_shipped_tests)
     print(f"\n汇总: {len(PASS)} PASS / {len(FAIL)} FAIL")
     if FAIL:
         for f in FAIL:

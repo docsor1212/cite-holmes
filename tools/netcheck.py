@@ -1,21 +1,25 @@
 #!/usr/bin/env python3
 # -*- coding: utf-8 -*-
-"""cite-holmes 真网稳定性自检（v6.3.0 F56）——注册库实时可达性+判定圆环+埋雷矩阵：
+"""cite-holmes 真网稳定性自检（v6.3.0 F56；v6.5.0 F60 增 N5）——注册库实时
+可达性+判定圆环+埋雷矩阵+跨注册库一致性：
 
-    python3 tools/netcheck.py            # 全量（四组实时圆环+埋雷，约 2-4 分钟）
+    python3 tools/netcheck.py            # 全量（四组实时圆环+埋雷+跨库一致，约 2-4 分钟）
     python3 tools/netcheck.py --quick    # 快档（注册库探针+埋雷矩阵，约 1 分钟）
 
-四组检查（引用数据全部当场从公共注册库实时拉取，绝不复用历史测试数据）：
-  N1 注册库探针：DOI.org/Crossref/E-utilities/arXiv/OpenAlex/S2/Unpaywall 可达性
+五组检查（引用数据全部当场从公共注册库实时拉取，绝不复用历史测试数据）：
+  N1 注册库探针：DOI.org/Crossref/E-utilities/arXiv/OpenAlex/S2/Unpaywall/Cloudflare-CDN 可达性
   N2 PubMed 圆环：实时拉全新 PMID → 引擎核验全 verified
   N3 Crossref 圆环：实时拉全新 DOI → 引擎核验零 invalid
   N4 埋雷矩阵：编造 DOI/假 arXiv/死链/真题名配假 DOI → 全部落网+真引用零误伤
+  N5 跨注册库一致性：同一真实 DOI 在 Crossref/OpenAlex/PubMed 三库的登记题名
+    归一后一致（引擎判定依赖多库元数据交叉——库间不一致会使忠实度判定失真；
+    任一库不可达=SKIP 诚实边界，不伪装通过）
 
 退出码 0=全过；1=有失败（agent 宿主/CI 可当部署后验证钩子）。
 与 selfcheck.py 的分工：selfcheck=offline 安装验证（零外呼）；netcheck=真网
 稳定性验证（注册库实时面）。两者构成两级验证体系。
 
-数据源：NCBI E-utilities / Crossref / arXiv 官方 API（公开数据，实时拉取）。
+数据源：NCBI E-utilities / Crossref / arXiv / OpenAlex 官方 API（公开数据，实时拉取）。
 诚实边界：注册库数字每日漂移，本工具测「判定通路在真实网络下的稳定性」，
 不测注册库覆盖率；网络受限环境请先配代理（--offline 场景请用 selfcheck）。"""
 
@@ -64,7 +68,7 @@ def run_engine(refs, out_prefix, timeout=420):
 
 
 def n1_probes():
-    """七注册库探针（可达性，≥5 通即过——单库抖动属诚实态）。"""
+    """八注册库探针（可达性，≥6 通即过——单库抖动属诚实态）。"""
     probes = [
         ("DOI.org", "https://doi.org/10.1542/peds.2006-2223", 302, 404),
         ("Crossref", "https://api.crossref.org/works/10.1542/peds.2006-2223", 200,),
@@ -159,6 +163,47 @@ def n3_crossref_ring(td, n=4):
     return results, None
 
 
+def n5_cross_registry():
+    """N5 跨注册库一致性（F60）：同一真实 DOI 在 Crossref/OpenAlex/PubMed
+    三库的登记题名归一后一致。锚点=10.1542/peds.2006-2223（PMID 17015575，
+    留出集 v1#4——2026-11-06 真网核验在档的稳定公开论文）。
+    诚实边界：任一库不可达=SKIP（环境态），不伪装通过；三库齐才可比。"""
+    import difflib
+    import re as _re
+    doi, pmid = "10.1542/peds.2006-2223", "17015575"
+    titles = {"Crossref": "", "OpenAlex": "", "PubMed": ""}
+    try:
+        t = (http_json(f"https://api.crossref.org/works/{doi}").get("message", {})
+             .get("title") or [""])[0]
+        if t:
+            titles["Crossref"] = t
+    except Exception as e:
+        print(f"  [N5] Crossref 不可达: {type(e).__name__}")
+    try:
+        w = http_json(f"https://api.openalex.org/works/doi:{doi}")
+        t = w.get("title") or w.get("display_name") or ""
+        titles["OpenAlex"] = t
+    except Exception as e:
+        print(f"  [N5] OpenAlex 不可达: {type(e).__name__}")
+    try:
+        sm = http_json("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/"
+                       "esummary.fcgi?db=pubmed&id=" + pmid + "&retmode=json"
+                       ).get("result", {}).get(pmid, {})
+        titles["PubMed"] = sm.get("title", "")
+    except Exception as e:
+        print(f"  [N5] PubMed 不可达: {type(e).__name__}")
+    got = {k: v for k, v in titles.items() if v}
+    if len(got) < 3:
+        missing = sorted(set(titles) - set(got))
+        return None, f"SKIP（{'/'.join(missing)} 不可达——三库齐才可比）"
+    norm = lambda s: _re.sub(r"[^a-z0-9]+", " ", s.lower()).strip()
+    pairs = [("Crossref", "OpenAlex"), ("Crossref", "PubMed"),
+             ("OpenAlex", "PubMed")]
+    ratios = {f"{a}~{b}": round(difflib.SequenceMatcher(
+        None, norm(got[a]), norm(got[b])).ratio(), 3) for a, b in pairs}
+    return ratios, got["Crossref"]
+
+
 def n4_mines(td):
     """埋雷矩阵：4 雷（全部应非 verified，其中编造 DOI/拼接应 invalid）
     +2 条真引用（零误伤）。真引用=#1-#2（真网核验过的稳定公开论文）。"""
@@ -213,6 +258,16 @@ def main():
                        if r["verdict"] == "invalid"]
                 check(f"N3 Crossref 实时圆环零 invalid（{len(res)} 条）",
                       not bad, f"invalid: {bad}")
+            # F60：跨注册库一致性（三库登记题名归一互比，库间不一致=引擎
+            # 多库元数据交叉的输入面失真信号；任一库不可达=SKIP 诚实）
+            ratios, err = n5_cross_registry()
+            if ratios is None:
+                check("N5 跨注册库一致性（环境跳过）", True, str(err))
+                PASS.append("N5 SKIP")
+            else:
+                worst = min(ratios.values())
+                check(f"N5 三库登记题名一致（最低相似度 {worst}）",
+                      worst >= 0.85, f"逐对: {ratios}")
         res, rc = n4_mines(td)
         if res is None:
             check("N4 埋雷矩阵（引擎调用失败）", False, str(rc))

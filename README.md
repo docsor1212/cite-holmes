@@ -237,6 +237,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v6.5.0** — in-package sealed test subset (manifest-driven; `selfcheck --tests`) so installers can re-verify verdict semantics and engineering locks; independent holdout set expanded to 36 refs (21 live-verified multi-domain clean + 15 planted forms, 7 new shapes) via a two-phase build pipeline with per-entry human-review freeze gate; `tools/run_tests.sh --held-out` live gate (capture=100% / zero false-kill / fidelity=100%); netcheck adds cross-registry title-consistency probe (Crossref/OpenAlex/PubMed).
+
 **v6.4.0** — TLS-fingerprint downgrade retry in the transport layer (fixes CDN-site unreachable misjudgements; request object rebuilt on the downgrade round) and metadata-fidelity grading annotations within partial (minor/major drift, verdict semantics untouched) with a live-calibrated corrosion holdout set; OpenAlex 429 backoff retry; `--require-version` strict tier (default off); `tools/run_tests.sh` suite entry; netcheck CDN probes.
 
 **v6.3.0** — `tools/netcheck.py` live-net stability self-check: seven-registry probes, live verification rings (freshly fetched fixtures), four-form mine matrix with zero clean-kill; two-tier verification system with the shipped offline selfcheck; the gate is content-bound against idle-pass.

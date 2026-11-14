@@ -78,7 +78,9 @@ class F55_HoldoutSet(unittest.TestCase):
                          "预埋伪造全部非 verified（capture 100%）")
         self.assertEqual(m["false_kill_rate"], 0.0,
                          "clean 条目零误杀（真实数据铁律的判定面体现）")
-        self.assertEqual(m["n"], 16)
+        # v6.5.0 F57 准入判据③：条数断言动态化（留出集扩容 16→36 不破锁）
+        self.assertEqual(m["n"], len(self.doc["refs"]))
+        self.assertGreaterEqual(m["n"], 16, "留出集规模不得缩水")
 
     def test_clean_entries_carry_verifiable_ids(self):
         # clean 条目必须带可核验标识符或可达 URL（真实数据铁律的静态面）

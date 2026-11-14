@@ -1,6 +1,6 @@
 ---
 name: cite-holmes
-version: 6.4.0
+version: 6.5.0
 author: DoctorQ Lab
 license: MIT
 description: >-
@@ -189,7 +189,7 @@ questions.
 
 | File | When |
 |---|---|
-| `scripts/verify_refs.py` · `tools/` | engine (pure stdlib); `run_eval.py` held-out eval runner · `selfcheck.py` offline install check · `netcheck.py` live-net stability check · `run_tests.sh` suite entry with time budget |
+| `scripts/verify_refs.py` · `tools/` | engine (pure stdlib); `run_eval.py` held-out eval runner & gate · `build_holdout.py` holdout build pipeline · `selfcheck.py` offline install check (incl. shipped test subset) · `netcheck.py` live-net stability check · `run_tests.sh` suite entry (time budget + `--shipped`/`--held-out`) |
 | `references/GLOSSARY.md` | canonical terms (five verdicts / signals / error codes) with Avoid lists |
 | `references/out-of-scope.md` | explicit non-goals + honest limits, each with a reason |
 | `references/security.md` | full security & behavior declaration |

@@ -41,26 +41,47 @@ python tools/run_eval.py --refs your_labeled.json --net   # 自备标注集 · �
 |---|---|---|---|---|---|
 | v5.3.0（2026-10-26 实测） | 内置金标 · offline | 100%（3/3） | 33%（1/3） | 0%（0/5） | partial 7 · invalid 1 |
 
-## 独立留出集（v6.2.0：examples/holdout_real.json，16 条）
+## 独立留出集（v6.5.0 扩容：examples/holdout_real.json，36 条）
 
 内置金标集（8 条）之外的第二评测面：**clean 条目经真实网络逐条核验后入集**
-（2026-11-06 直连注册库实测，构造中凭记忆书写的 8 条 DOI 因真网核验不过被
-全部剔除——真实数据铁律的现场实证）。口径与内置金标一致，复现命令：
+（2026-11-06 首建 16 条，构造中凭记忆书写的 8 条 DOI 因真网核验不过被全部
+剔除——真实数据铁律的现场实证；2026-11-15 v6.5.0 经 tools/build_holdout.py
+半自动管线扩至 36 条，扩容中 2 条记忆 PMID 又被引擎 DOI↔PMID 交叉当场处决，
+撤出错误 PMID 后重新入集）。口径与内置金标一致，复现命令：
 
 ```bash
 python tools/run_eval.py --refs examples/holdout_real.json          # offline
 python tools/run_eval.py --refs examples/holdout_real.json --net    # 真网
+tools/run_tests.sh --held-out                                       # 真网闸门（v6.5.0）
 ```
 
-| 口径 | capture | strict_capture | false_kill | 备注 |
-|---|---|---|---|---|
-| offline（2026-11-06 实测） | 100%（8/8） | 25%（2/8） | 0%（0/8） | 裸条目/泛题名结构层实锤 |
-| net（2026-11-06 实测） | 100%（8/8） | 62.5%（5/8） | 0%（0/8） | 错配/拼接/假 arXiv/良构假 DOI 全实锤 |
+**集构成（v2）**：clean 21 条（医学/生物/化学/物理/计算机/心理/气候/生态
+多域真实文献，DOI 注册商前缀 ≥8 家）+ planted 15 条（15 种伪造形态，v6.5.0
+新增 7 形态：真 arXiv 配错题名/真实撤稿论文/真 PMID 配编造 DOI/真 URL+编造
+DOI 多标识符矛盾/真题名配编造 DOI/真题名配假 arXiv/编造 DOI 解析 URL）。
+**批内 DOI 唯一**是集合纪律（M5 教训入库：CLI 批内缓存按 DOI 复用判定，同
+DOI 多条掩蔽腐蚀——集合对 run_eval 逐条隔离与 CLI 批内两种通路都诚实）。
 
-形态覆盖：良构假 DOI/编造 URL/裸条目/泛题名/真题名配假 DOI（错引）/真 DOI
-配错 PMID（拼接）/假 arXiv×2——8 种伪造形态。**诚实边界**：预埋位置公开
-（边界 4 继续适用）；net 口径数字随注册库漂移（边界 2）；clean 集真网核验
-状态有时效性（站点可达性变化属 unreachable 诚实态，非误杀）。
+**半自动构建管线**（v6.5.0：tools/build_holdout.py）：草案（--candidates
+真网逐条核验→建议标签+DOI 唯一性前置拦截）与冻结（--freeze）两阶段分离，
+冻结闸要求每条带人工逐条拍板的 reviewed 字段——管线只出建议，防草案直通
+入集。真实数据铁律的工装化：未来扩容不再走「记忆书写」回头路。
+
+**真网闸门**（v6.5.0：run_tests.sh --held-out）：留出集（capture=100%+
+false_kill=0）与忠实度腐蚀集（分级命中=100%）双闸门，违例退出码 1——
+发布链/CI 可当判定语义回归门。run_eval 直调 verify_one 逐条隔离（不走
+CLI 批内缓存、不读写持久磁盘缓存），闸门数字逐条独立。
+
+offline 口径（2026-11-15 实测，36 条）：capture 100%（15/15）、
+false_kill 0%（0/21）。net 口径（2026-11-15 实测，36 条）：capture 100%、
+false_kill 0%（判定分布 partial 22/invalid 10/unreachable 2/unverified 2，
+unreachable/unverified 全部落在 planted 侧）。
+
+形态覆盖：良构假 DOI×2 家族/编造 URL/裸条目/泛题名/真题名配假 DOI（错引）/
+真 DOI 配错 PMID（拼接）/假 arXiv×3/真 arXiv 配错题名/真实撤稿论文/真 PMID
+配编造 DOI/多标识符矛盾/编造 DOI 解析 URL——15 种伪造形态。**诚实边界**：
+预埋位置公开（边界 4 继续适用）；net 口径数字随注册库漂移（边界 2）；clean
+集真网核验状态有时效性（站点可达性变化属 unreachable 诚实态，非误杀）。
 
 ## 元数据忠实度腐蚀集（v6.4.0：examples/holdout_fidelity.json，6 条）
 

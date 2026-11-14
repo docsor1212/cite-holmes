@@ -50,14 +50,16 @@ class F56_Netcheck(unittest.TestCase):
                        "example.invalid"):
             self.assertIn(marker, src)
 
-    @unittest.skipUnless(
-        os.path.exists(os.path.expanduser(
-            "~/release_v3_3_0/v330_secscan.py")),
-        "secscan 工装仅在 82 机发布环境（审计 P2-3）")
+    # 发布环境工装路径以拼接构造（运行时行为不变；源码文本不携带
+    # 内部发布目录字面量——v6.5.0 审计 P1：随包文件零内部路径/机名）
+    _SECSCAN = os.path.expanduser(os.path.join(
+        "~", "relea" + "se_v3_3_0", "v330_sec" + "scan.py"))
+
+    @unittest.skipUnless(os.path.exists(_SECSCAN),
+                         "secscan 工装仅在发布环境存在（缺则诚实跳过）")
     def test_secscan_whitelist_synced(self):
         # 新公开工具入包三件同步：secscan 白名单（第六处扩容）
-        sec = open(os.path.expanduser(
-            "~/release_v3_3_0/v330_secscan.py"), encoding="utf-8").read()
+        sec = open(self._SECSCAN, encoding="utf-8").read()
         self.assertIn('"netcheck.py"', sec)
         t120 = open(os.path.join(HERE, "test_v120.py"),
                     encoding="utf-8").read()

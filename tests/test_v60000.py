@@ -107,9 +107,13 @@ class DualShell(unittest.TestCase):
 
     def test_mcp_dir_prefixed_registration(self):
         # 壳源码按目录决定前缀——mcp 目录加载注册名带 mcp_ 前缀（逐字节一致的双副本语义）
+        # v6.6.0 F64：改空白容忍正则（格式化器引号归一双引号后仍锁同形态）
+        import re
         src = open(os.path.join(SK, "scripts", "verify_refs.py"),
                    encoding="utf-8").read()
-        self.assertIn("_PREFIX = 'mcp_' if _os.path.basename(_HERE) == 'mcp' else ''", src)
+        self.assertIsNotNone(re.search(
+            r'_PREFIX = ["\']mcp_["\'] if _os\.path\.basename\(_HERE\) == '
+            r'["\']mcp["\'] else ["\']["\']', src))
 
 
 if __name__ == "__main__":

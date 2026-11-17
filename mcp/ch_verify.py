@@ -20,8 +20,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-
-
 _ROOT = None  # 由 verify_refs 壳注入
 
 
@@ -30,9 +28,14 @@ def _bind(root):
     _ROOT = root
 
 
-def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
-                  since: int = None, sort: str = "relevance",
-                  policy: dict = None) -> tuple:
+def discover_refs(
+    topic: str,
+    limit: int = 10,
+    timeout: float = 15.0,
+    since: int = None,
+    sort: str = "relevance",
+    policy: dict = None,
+) -> tuple:
     """v4.5.0 文献发现：主题 → PubMed + OpenAlex 双源检索 → 候选清单。
 
     把 skill 从「验已有的文献」扩展为「找文献且出生即核验」——检索结果天然
@@ -46,9 +49,15 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
     seen = set()
 
     def _key(doi, pmid, title):
-        return (f"doi:{doi.lower()}" if doi else
-                f"pmid:{pmid}" if pmid else
-                "t:" + re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", (title or "").lower())[:60])
+        return (
+            f"doi:{doi.lower()}"
+            if doi
+            else (
+                f"pmid:{pmid}"
+                if pmid
+                else "t:" + re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", (title or "").lower())[:60]
+            )
+        )
 
     def _add(doi, pmid, title, source, year, cited_by=None, src_type=None):
         doi = (doi or "").replace("https://doi.org/", "").strip()
@@ -79,23 +88,27 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
     if sort == "cited":
         notes.append("PubMed 无被引排序——该源按相关性回退")
     try:
-        u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-             + _ROOT._ncbi_qs(f"?db=pubmed&retmode=json&retmax={limit}&sort={pm_sort}"
-                        f"&term={quote(topic)}"))
+        u = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi" + _ROOT._ncbi_qs(
+            f"?db=pubmed&retmode=json&retmax={limit}&sort={pm_sort}" f"&term={quote(topic)}"
+        )
         if not _ROOT._cb_open(u):
             _ROOT._ncbi_rate_wait()
             req = urllib.request.Request(
-                u, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+                u, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"}
+            )
             with _ROOT._urlopen_retry(req, timeout) as resp:
                 j = json.loads(resp.read().decode("utf-8", "ignore"))
             _ROOT._cb_record(u, False)
             ids = [str(x) for x in ((j.get("esearchresult") or {}).get("idlist") or [])]
             if ids:
-                u2 = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
-                      + _ROOT._ncbi_qs(f"?db=pubmed&retmode=json&id={','.join(ids)}"))
+                u2 = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi" + _ROOT._ncbi_qs(
+                    f"?db=pubmed&retmode=json&id={','.join(ids)}"
+                )
                 _ROOT._ncbi_rate_wait()
                 req2 = urllib.request.Request(
-                    u2, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+                    u2,
+                    headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"},
+                )
                 try:
                     with _ROOT._urlopen_retry(req2, timeout) as resp2:
                         j2 = json.loads(resp2.read().decode("utf-8", "ignore"))
@@ -107,17 +120,23 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
                 for pid in ids:
                     doc = res.get(pid) or {}
                     my = re.search(r"(19|20)\d{2}", str(doc.get("pubdate") or ""))
-                    _add(_ROOT._pmid_reg_doi(doc), pid, doc.get("title"),
-                         doc.get("source") or "",
-                         int(my.group(0)) if my else None)
+                    _add(
+                        _ROOT._pmid_reg_doi(doc),
+                        pid,
+                        doc.get("title"),
+                        doc.get("source") or "",
+                        int(my.group(0)) if my else None,
+                    )
             else:
                 notes.append("PubMed 该主题零命中")
         else:
             notes.append("PubMed 断路器跳过")
     except urllib.error.HTTPError as e:
         _ROOT._cb_record(u, False, degrade=False)  # 审计 P2：服务器应答不熔断，但必须记账
-        notes.append(f"PubMed HTTP {e.code}——本源跳过"
-                     + ("（限流，建议 NCBI_API_KEY）" if e.code in (429, 403) else ""))
+        notes.append(
+            f"PubMed HTTP {e.code}——本源跳过"
+            + ("（限流，建议 NCBI_API_KEY）" if e.code in (429, 403) else "")
+        )
     except Exception:
         _ROOT._cb_record(u, True)  # 审计 P2：传输失败必须进断路器/全局降级
         notes.append("PubMed 检索失败——本源跳过")
@@ -125,35 +144,53 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
     ou = None
     try:
         q = quote(topic, safe="")
-        ou = (f"https://api.openalex.org/works?search={q}&per-page={limit}"
-              "&select=display_name,publication_year,doi,primary_location,cited_by_count"
-              + ("&sort=cited_by_count:desc" if sort == "cited" else
-                 "&sort=publication_date:desc" if sort == "newest" else ""))
+        ou = (
+            f"https://api.openalex.org/works?search={q}&per-page={limit}"
+            "&select=display_name,publication_year,doi,primary_location,cited_by_count"
+            + (
+                "&sort=cited_by_count:desc"
+                if sort == "cited"
+                else "&sort=publication_date:desc" if sort == "newest" else ""
+            )
+        )
         okey = _ROOT._OPTS.get("openalex_key") or ""
         if okey:
             ou += f"&api_key={quote(okey, safe='')}"
         if not _ROOT._cb_open(ou):
             oreq = urllib.request.Request(
-                ou, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+                ou, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"}
+            )
             with _ROOT._urlopen_retry(oreq, timeout) as oresp:
                 oj = json.loads(oresp.read().decode("utf-8", "ignore"))
             _ROOT._cb_record(ou, False)
-            for w in (oj.get("results") or []):
-                _src_obj = ((w.get("primary_location") or {}).get("source")
-                            if isinstance(w.get("primary_location"), dict) else {}) or {}
-                _add(w.get("doi"), None, w.get("display_name"),
-                     _src_obj.get("display_name"),
-                     w.get("publication_year"),
-                     cited_by=w.get("cited_by_count"),
-                     src_type=_src_obj.get("type"))
+            for w in oj.get("results") or []:
+                _src_obj = (
+                    (w.get("primary_location") or {}).get("source")
+                    if isinstance(w.get("primary_location"), dict)
+                    else {}
+                ) or {}
+                _add(
+                    w.get("doi"),
+                    None,
+                    w.get("display_name"),
+                    _src_obj.get("display_name"),
+                    w.get("publication_year"),
+                    cited_by=w.get("cited_by_count"),
+                    src_type=_src_obj.get("type"),
+                )
         else:
             notes.append("OpenAlex 断路器跳过")
     except urllib.error.HTTPError as e:
         if ou:
             _ROOT._cb_record(ou, False, degrade=False)  # 服务器应答不熔断（自家惯例）
-        notes.append(f"OpenAlex HTTP {e.code}——本源跳过"
-                     + ("（2026 年起生产调用需 --openalex-key）" if e.code == 403
-                        else "（限流）" if e.code == 429 else ""))
+        notes.append(
+            f"OpenAlex HTTP {e.code}——本源跳过"
+            + (
+                "（2026 年起生产调用需 --openalex-key）"
+                if e.code == 403
+                else "（限流）" if e.code == 429 else ""
+            )
+        )
     except Exception:
         if ou:
             _ROOT._cb_record(ou, True)
@@ -172,24 +209,30 @@ def discover_refs(topic: str, limit: int = 10, timeout: float = 15.0,
         else:
             # 审计 P3：60 字符前缀碰撞可能是不同论文（如 part one vs part one
             # extended）——年份不相容不融合，防 crosscheck 假 invalid
-            yr_ok = (not hit.get("year") or not r.get("year")
-                     or abs(int(hit["year"]) - int(r["year"])) <= 1)
+            yr_ok = (
+                not hit.get("year")
+                or not r.get("year")
+                or abs(int(hit["year"]) - int(r["year"])) <= 1
+            )
             if yr_ok:
                 for k, v in r.items():
                     if v and not hit.get(k):
                         hit[k] = v
                 # 审计 P2-2：_cited_by=0 是有效测量值，falsy 守卫不得吞掉
-                if (hit.get("_cited_by") is None
-                        and r.get("_cited_by") is not None):
+                if hit.get("_cited_by") is None and r.get("_cited_by") is not None:
                     hit["_cited_by"] = r["_cited_by"]
     if policy and policy.get("journal_only"):  # v5.2.0 信源策展（discover 期硬过滤）
         _n0 = len(merged)
-        merged = [r for r in merged
-                  if r.get("pmid")  # PubMed 题录天然期刊
-                  or r.get("_src_type") == "journal"]
+        merged = [
+            r
+            for r in merged
+            if r.get("pmid") or r.get("_src_type") == "journal"  # PubMed 题录天然期刊
+        ]
         if len(merged) < _n0:
-            notes.append(f"信源政策 journal_only：过滤 {_n0 - len(merged)} 条"
-                         "非期刊源（预印本/知识库/未知类型）")
+            notes.append(
+                f"信源政策 journal_only：过滤 {_n0 - len(merged)} 条"
+                "非期刊源（预印本/知识库/未知类型）"
+            )
     return merged, notes
 
 
@@ -206,8 +249,7 @@ def _parse_source_policy(spec: str):
             continue
         for kind in ("allow-domain", "deny-domain"):
             if seg.startswith(kind + "="):
-                doms = [d.strip().lower() for d in seg[len(kind) + 1:].split("|")
-                        if d.strip()]
+                doms = [d.strip().lower() for d in seg[len(kind) + 1 :].split("|") if d.strip()]
                 if not doms:
                     return None
                 pol["allow" if kind.startswith("allow") else "deny"].extend(doms)
@@ -233,11 +275,9 @@ def apply_source_policy(results: list, policy: dict, medical: bool = False) -> i
                 viol = f"deny-domain 命中 {d}（该域已被政策排除）"
                 break
         if not viol and policy.get("allow"):
-            if host and not any(host == d or host.endswith("." + d)
-                                for d in policy["allow"]):
+            if host and not any(host == d or host.endswith("." + d) for d in policy["allow"]):
                 viol = "allow-domain 未命中（来源不在政策允许域内）"
-        if (not viol and policy.get("journal_only")
-                and host and r.get("url")):
+        if not viol and policy.get("journal_only") and host and r.get("url"):
             try:
                 if _ROOT.classify_tier(r.get("url") or "", medical) != "journal":
                     viol = "journal_only：非期刊 web 来源（层级见 tier 列）"
@@ -245,8 +285,9 @@ def apply_source_policy(results: list, policy: dict, medical: bool = False) -> i
                 pass
         if viol:
             r.setdefault("checks", {})["source_policy"] = {"violation": viol}
-            r["note"] = ((r.get("note") + "；") if r.get("note") else "") + \
-                f"信源政策：{viol}——引用前请人工确认"
+            r["note"] = (
+                (r.get("note") + "；") if r.get("note") else ""
+            ) + f"信源政策：{viol}——引用前请人工确认"
             r["needs_human_check"] = True
             n += 1
     return n
@@ -261,18 +302,18 @@ def apply_research_profile(path: str, args):
         with open(os.path.expanduser(path), encoding="utf-8") as f:
             doc = json.load(f)
     except (OSError, ValueError) as e:
-        print(f"❌ 研究档案读取失败：{e}（--research-profile 需要结构化 JSON）",
-              file=sys.stderr)
+        print(f"❌ 研究档案读取失败：{e}（--research-profile 需要结构化 JSON）", file=sys.stderr)
         return None
     if not isinstance(doc, dict):
-        print("❌ 研究档案须为 JSON 对象（preset/source_policy/export 三键）",
-              file=sys.stderr)
+        print("❌ 研究档案须为 JSON 对象（preset/source_policy/export 三键）", file=sys.stderr)
         return None
     known = {"preset", "source_policy", "export"}
     unknown = [k for k in doc if k not in known]
     if unknown:
-        print(f"[profile] 未知键忽略：{', '.join(unknown)}（支持：preset / "
-              "source_policy / export）")
+        print(
+            f"[profile] 未知键忽略：{', '.join(unknown)}（支持：preset / "
+            "source_policy / export）"
+        )
     applied = []
     pv = str(doc.get("preset") or "").strip()
     if pv and not getattr(args, "preset", ""):
@@ -311,18 +352,28 @@ def build_next_round(report: dict, out_path: str):
     keep = []
     for r in results:
         if not isinstance(r, dict) or r.get("verdict") not in (
-                "partial", "unreachable", "unverified"):
+            "partial",
+            "unreachable",
+            "unverified",
+        ):
             continue
-        ref = {k: r.get(k) for k in ("title", "url", "doi", "pmid", "arxiv",
-                                     "source", "year") if r.get(k)}
+        ref = {
+            k: r.get(k)
+            for k in ("title", "url", "doi", "pmid", "arxiv", "source", "year")
+            if r.get(k)
+        }
         if not ref:
             continue
         ref["_retry_reason"] = re.sub(r"\s+", " ", str(r.get("note") or ""))[:120]
         keep.append(ref)
-    skeleton = {"_comment": ("cite-holmes 下一轮重验骨架（v%s 生成）：按需修订"
-                             "字段后作为 --refs 输入重跑；_retry_reason 仅供人读，"
-                             "引擎忽略未知键" % _ROOT.VERSION),
-                "refs": keep}
+    skeleton = {
+        "_comment": (
+            "cite-holmes 下一轮重验骨架（v%s 生成）：按需修订"
+            "字段后作为 --refs 输入重跑；_retry_reason 仅供人读，"
+            "引擎忽略未知键" % _ROOT.VERSION
+        ),
+        "refs": keep,
+    }
     with open(out_path, "w", encoding="utf-8") as f:
         json.dump(skeleton, f, ensure_ascii=False, indent=2)
     return out_path, len(keep)
@@ -340,8 +391,7 @@ def _trace_append(path: str, mode: str, fields: dict) -> None:
         pass
 
 
-def verify_one(ref: dict, idx: int, offline: bool, timeout: float,
-               medical: bool = False) -> dict:
+def verify_one(ref: dict, idx: int, offline: bool, timeout: float, medical: bool = False) -> dict:
     """verify_one 对外入口（v5.6.0 拆分：核心 _verify_one_impl + 统一后处理）。
     OA 富集在 wrapper 统一接线——四条提前 return 的 verified 路径
     （PMID 反查/卷期页锚定/OpenAlex 找锚/着陆页救回）与主路径一样被覆盖。"""
@@ -351,20 +401,31 @@ def verify_one(ref: dict, idx: int, offline: bool, timeout: float,
     return out
 
 
-def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical: bool = False) -> dict:
+def _verify_one_impl(
+    ref: dict, idx: int, offline: bool, timeout: float, medical: bool = False
+) -> dict:
     def _s(v):
         return str(v) if v is not None else ""
 
     title_in = _s(ref.get("title"))
-    out = {"index": idx, "title": title_in or "(无标题)",
-           "url": _s(ref.get("url")).strip(),
-           "doi": _s(ref.get("doi")).strip(), "pmid": _s(ref.get("pmid")).strip(),
-           "arxiv": _ROOT.extract_arxiv_id(ref),
-           "source": _s(ref.get("source")).strip(), "year": ref.get("year"),
-           "tier": ref.get("tier") or "", "semantic": ref.get("semantic", ""),
-           "verdict": "unverified", "http_status": None, "note": "", "needs_human_check": False,
-           "checks": {},  # v1.9 透明工作底稿：逐项检查的结构化明细（随 JSON 报告/auditjson 导出）
-           "semantic_audit": _ROOT.build_semantic_audit(ref)}  # v1.11 语义层底稿（dict 输入才非空）
+    out = {
+        "index": idx,
+        "title": title_in or "(无标题)",
+        "url": _s(ref.get("url")).strip(),
+        "doi": _s(ref.get("doi")).strip(),
+        "pmid": _s(ref.get("pmid")).strip(),
+        "arxiv": _ROOT.extract_arxiv_id(ref),
+        "source": _s(ref.get("source")).strip(),
+        "year": ref.get("year"),
+        "tier": ref.get("tier") or "",
+        "semantic": ref.get("semantic", ""),
+        "verdict": "unverified",
+        "http_status": None,
+        "note": "",
+        "needs_human_check": False,
+        "checks": {},  # v1.9 透明工作底稿：逐项检查的结构化明细（随 JSON 报告/auditjson 导出）
+        "semantic_audit": _ROOT.build_semantic_audit(ref),
+    }  # v1.11 语义层底稿（dict 输入才非空）
 
     pmid = out["pmid"]
     doi_adj, doi_matched = "", False
@@ -374,43 +435,49 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
     if not url:
         raw_arxiv = str(ref.get("arxiv") or "").strip()
         if raw_arxiv and not out["arxiv"]:
-            out.update(verdict="invalid",
-                       note="arxiv 字段格式无法识别（应为 YYMM.NNNNN 或 category/NNNNNNN）")
+            out.update(
+                verdict="invalid",
+                note="arxiv 字段格式无法识别（应为 YYMM.NNNNN 或 category/NNNNNNN）",
+            )
         else:
             # v3.4 外部独测合并(#2):无标识符引用先走标题检索(与 SKILL.md「查无≠编造」
             # 声明对齐)——确认存在→partial 保留;查无→unverified 转人工(诚实未知),
             # 不得以「缺标识符」判编造。离线模式维持原 invalid。
             t_claim = _ROOT.clean_title(str(ref.get("title") or "")).strip()
             if offline or not t_claim:
-                out.update(verdict="invalid",
-                           note="缺少 url 且无可解析的 doi/pmid/arxiv" +
-                                ("（pmid 须为 6-9 位数字）" if pmid else ""))
+                out.update(
+                    verdict="invalid",
+                    note="缺少 url 且无可解析的 doi/pmid/arxiv"
+                    + ("（pmid 须为 6-9 位数字）" if pmid else ""),
+                )
                 return out
             # v4.0.0 Vancouver 医学引用的官方核验通道（PubMed 题名反查）——
             # 置于 OpenAlex/S2 之前：它是唯一能给出「官方一致→verified」的无
             # 标识符通道；未命中静默，继续现有确认路径（只确认不降级不变）
             pm_adj, pm_note, pm_matched, rev_pmid, pm_net_err = _ROOT.pubmed_title_reverse_lookup(
-                t_claim, str(ref.get("source") or ""), ref.get("year"),
-                max(timeout, 20.0))  # 反查=esearch+esummary 两跳，单跳超时给足
-            _eutils_open = any(d.get("open") for hk, d in _ROOT._CB.items()
-                               if "eutils" in hk)
+                t_claim, str(ref.get("source") or ""), ref.get("year"), max(timeout, 20.0)
+            )  # 反查=esearch+esummary 两跳，单跳超时给足
+            _eutils_open = any(d.get("open") for hk, d in _ROOT._CB.items() if "eutils" in hk)
             out["checks"]["pubmed_reverse"] = {
-                "ran": True, "matched": pm_matched,
+                "ran": True,
+                "matched": pm_matched,
                 "pmid": rev_pmid or None,
-                "skipped_by_circuit": (not pm_matched and not pm_note
-                                       and _eutils_open),
+                "skipped_by_circuit": (not pm_matched and not pm_note and _eutils_open),
                 # v4.1.0：传输失败与查无必须可区分（报告层按此注明「核验未完成」）
-                "network_error": pm_net_err}
+                "network_error": pm_net_err,
+            }
             if pm_note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + pm_note
             if pm_matched and pm_adj == "":
                 # 审计 P3 修复:PMID 锚结构化回填——bibtex/CSV 导出与批内去重可获取
                 if not out.get("pmid"):
                     out["pmid"] = rev_pmid
-                out.update(verdict="verified",
-                           needs_human_check=False,
-                           note=(out["note"] + "；" if out["note"] else "") +
-                                "无标识符引用经 PubMed 官方题名反查核验一致，已回填 PMID 锚")
+                out.update(
+                    verdict="verified",
+                    needs_human_check=False,
+                    note=(out["note"] + "；" if out["note"] else "")
+                    + "无标识符引用经 PubMed 官方题名反查核验一致，已回填 PMID 锚",
+                )
                 return out
             if pm_adj == "partial":
                 out.update(verdict="partial", needs_human_check=True)
@@ -419,25 +486,40 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
             # 期刊+年+卷(期):页 是 PubMed 官方引文定位器，语言无关——
             # 中文声称题名 vs 登记题名翻译差异不再阻断核验
             loc_adj, loc_note, loc_matched, loc_pmid, loc_err = _ROOT.pubmed_locator_lookup(
-                out["source"], ref.get("year"), ref.get("volume"),
-                ref.get("issue"), ref.get("pages"), max(timeout, 15.0),
-                claimed_title=t_claim)
+                out["source"],
+                ref.get("year"),
+                ref.get("volume"),
+                ref.get("issue"),
+                ref.get("pages"),
+                max(timeout, 15.0),
+                claimed_title=t_claim,
+            )
             out["checks"]["pubmed_locator"] = {
                 "ran": bool(out["source"] and ref.get("volume") and ref.get("year")),
-                "matched": loc_matched, "pmid": loc_pmid or None,
-                "network_error": loc_err}
+                "matched": loc_matched,
+                "pmid": loc_pmid or None,
+                "network_error": loc_err,
+            }
             if loc_note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + loc_note
             if loc_matched and loc_adj == "":
                 if not out.get("pmid"):
                     out["pmid"] = loc_pmid
-                out.update(verdict="verified", needs_human_check=False,
-                           note=(out["note"] + "；" if out["note"] else "") +
-                                "无标识符引用经 PubMed 卷期页锚定核验一致，已回填 PMID 锚")
+                out.update(
+                    verdict="verified",
+                    needs_human_check=False,
+                    note=(out["note"] + "；" if out["note"] else "")
+                    + "无标识符引用经 PubMed 卷期页锚定核验一致，已回填 PMID 锚",
+                )
                 return out
-            oa_note, oa_confirmed, oa_doi = _ROOT.openalex_works_lookup(t_claim, ref.get("year"), timeout)
-            out["checks"]["openalex"] = {"ran": True, "confirmed": oa_confirmed,
-                                         "doi_candidate": oa_doi or None}
+            oa_note, oa_confirmed, oa_doi = _ROOT.openalex_works_lookup(
+                t_claim, ref.get("year"), timeout
+            )
+            out["checks"]["openalex"] = {
+                "ran": True,
+                "confirmed": oa_confirmed,
+                "doi_candidate": oa_doi or None,
+            }
             s2_matched, s2_note = _ROOT.s2_title_confirm(t_claim, timeout)
             out["checks"]["s2_title"] = {"matched": s2_matched}
             if oa_note:
@@ -450,12 +532,18 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
             # 放行）；撤稿检测照走，锚定通路不绕开安全检查。
             if oa_confirmed and oa_doi and not offline and _ROOT.DOI_RE.match(oa_doi):
                 doi_adj2, note2, doi_m2, csl2 = _ROOT.doi_metadata_match(
-                    oa_doi, _ROOT.clean_title(str(ref.get("title") or "")),
-                    ref.get("year"), timeout,
+                    oa_doi,
+                    _ROOT.clean_title(str(ref.get("title") or "")),
+                    ref.get("year"),
+                    timeout,
                     str(ref.get("source") or ""),
-                    str(ref.get("authors") or ""))
+                    str(ref.get("authors") or ""),
+                )
                 out["checks"]["doi_metadata"] = {
-                    "matched": doi_m2, "adjust": doi_adj2, "via": "openalex-anchor"}
+                    "matched": doi_m2,
+                    "adjust": doi_adj2,
+                    "via": "openalex-anchor",
+                }
                 if csl2:
                     out["checks"]["doi_metadata"]["csl"] = csl2
                 if note2:
@@ -464,14 +552,22 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
                 retracted = bool(ret2.get("retracted"))
                 out["checks"]["retraction"] = ret2
                 if ret2.get("nature"):
-                    out["note"] = (out["note"] + "；" if out["note"] else "") + \
-                        _ROOT._retraction_nature_note(
-                            ret2["nature"], ret2["when"], ret2["notice_doi"],
-                            "本地 Retraction Watch 索引" if ret2.get("source") == "local"
-                            else "Crossref/Retraction Watch")
+                    out["note"] = (
+                        out["note"] + "；" if out["note"] else ""
+                    ) + _ROOT._retraction_nature_note(
+                        ret2["nature"],
+                        ret2["when"],
+                        ret2["notice_doi"],
+                        (
+                            "本地 Retraction Watch 索引"
+                            if ret2.get("source") == "local"
+                            else "Crossref/Retraction Watch"
+                        ),
+                    )
                 elif ret2.get("check_failed"):
-                    out["note"] = (out["note"] + "；" if out["note"] else "") + \
-                        "撤稿检查未完成（网络传输失败，重试后仍不通）——非「未撤稿」"
+                    out["note"] = (
+                        out["note"] + "；" if out["note"] else ""
+                    ) + "撤稿检查未完成（网络传输失败，重试后仍不通）——非「未撤稿」"
                 if doi_adj2 == "invalid":
                     out.update(verdict="invalid", needs_human_check=True)
                     return out
@@ -487,9 +583,12 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
                     else:
                         if not out.get("doi"):
                             out["doi"] = oa_doi
-                        out.update(verdict="verified", needs_human_check=False,
-                                   note=(out["note"] + "；" if out["note"] else "") +
-                                        "无标识符引用经 OpenAlex 找锚、DOI.org 权威核验一致，已回填 DOI 锚")
+                        out.update(
+                            verdict="verified",
+                            needs_human_check=False,
+                            note=(out["note"] + "；" if out["note"] else "")
+                            + "无标识符引用经 OpenAlex 找锚、DOI.org 权威核验一致，已回填 DOI 锚",
+                        )
                     return out
                 # doi_adj2 == "partial"（跨语言桥接未命中/相似度居中）→ 封顶 partial
                 out.update(verdict="partial", needs_human_check=True)
@@ -497,9 +596,12 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
             if oa_confirmed:
                 out.update(verdict="partial", needs_human_check=True)
                 return out
-            out.update(verdict="unverified", needs_human_check=True,
-                       note=(out["note"] + "；" if out["note"] else "") +
-                            "无标识符且两库标题检索未确认——未知状态转人工，不作编造判定")
+            out.update(
+                verdict="unverified",
+                needs_human_check=True,
+                note=(out["note"] + "；" if out["note"] else "")
+                + "无标识符且两库标题检索未确认——未知状态转人工，不作编造判定",
+            )
             return out
         return out
     if not re.match(r"^https?://", url, re.IGNORECASE):
@@ -523,9 +625,13 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
         s2_matched = False
         if out["doi"] and _ROOT.DOI_RE.match(out["doi"]):
             doi_adj, note, doi_matched, doi_csl = _ROOT.doi_metadata_match(
-                out["doi"], _ROOT.clean_title(str(ref.get("title") or "")), ref.get("year"), timeout,
+                out["doi"],
+                _ROOT.clean_title(str(ref.get("title") or "")),
+                ref.get("year"),
+                timeout,
                 str(ref.get("source") or ""),
-                str(ref.get("authors") or ""))
+                str(ref.get("authors") or ""),
+            )
             out["checks"]["doi_metadata"] = {"matched": doi_matched, "adjust": doi_adj}
             # v3.6:注册库权威元数据(GB/T 7714 导出原料)——仅 matched 时可信
             if doi_matched and doi_csl:
@@ -539,7 +645,8 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
             # 的第二路正面确认——只确认不降级（S2 记录质量参差，不一致静默）
             if not doi_matched:
                 s2_matched, s2note = _ROOT.s2_doi_confirm(
-                    out["doi"], _ROOT.clean_title(str(ref.get("title") or "")), timeout)
+                    out["doi"], _ROOT.clean_title(str(ref.get("title") or "")), timeout
+                )
                 out["checks"]["s2"] = {"matched": s2_matched}
                 if s2note:
                     out["note"] = (out["note"] + "；" if out["note"] else "") + s2note
@@ -551,12 +658,20 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
             out["checks"]["retraction"] = ret
             if ret.get("nature"):
                 retnote = _ROOT._retraction_nature_note(
-                    ret["nature"], ret["when"], ret["notice_doi"],
-                    "本地 Retraction Watch 索引" if ret.get("source") == "local"
-                    else "Crossref/Retraction Watch")
+                    ret["nature"],
+                    ret["when"],
+                    ret["notice_doi"],
+                    (
+                        "本地 Retraction Watch 索引"
+                        if ret.get("source") == "local"
+                        else "Crossref/Retraction Watch"
+                    ),
+                )
             elif ret.get("check_failed"):
-                retnote = ("撤稿检查未完成（网络传输失败，重试后仍不通）——"
-                           "本条结果不含撤稿核验，非「未撤稿」")
+                retnote = (
+                    "撤稿检查未完成（网络传输失败，重试后仍不通）——"
+                    "本条结果不含撤稿核验，非「未撤稿」"
+                )
             else:
                 retnote = ""
             if retnote:
@@ -567,7 +682,11 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
         # 同样先于可达性检查，避免假 ID 被误判为 unreachable（v1.5）
         elif out["arxiv"]:
             arxiv_adj, note, arxiv_matched = _ROOT.arxiv_metadata_match(
-                out["arxiv"], _ROOT.clean_title(str(ref.get("title") or "")), ref.get("year"), timeout)
+                out["arxiv"],
+                _ROOT.clean_title(str(ref.get("title") or "")),
+                ref.get("year"),
+                timeout,
+            )
             out["checks"]["arxiv_metadata"] = {"matched": arxiv_matched, "adjust": arxiv_adj}
             if note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + note
@@ -576,8 +695,12 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
                 return out
         # v1.6：双键引用（doi+pmid）做交叉一致性——两键各自真实也可能拼接造假，
         # 元数据层判定，先于可达性检查
-        if (out["doi"] and _ROOT.DOI_RE.match(out["doi"])
-                and out["pmid"] and _ROOT.PMID_RE.match(out["pmid"])):
+        if (
+            out["doi"]
+            and _ROOT.DOI_RE.match(out["doi"])
+            and out["pmid"]
+            and _ROOT.PMID_RE.match(out["pmid"])
+        ):
             xadj, xnote = _ROOT.pmid_doi_crosscheck(out["pmid"], out["doi"], timeout)
             out["checks"]["doi_pmid_crosscheck"] = {"done": True}
             if xnote:
@@ -594,21 +717,28 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
             # 引用存在性已被官方注册库证实，不能因反爬误判为 unreachable。评审修正：
             # 救回不再无条件盖 verified——层级/字段门控照走，防"真 ID + 403 博客链接"骗过权威层
             if (doi_matched or arxiv_matched or s2_matched) and status in (403, 429):
-                label = ("DOI" if doi_matched else "arXiv" if arxiv_matched
-                         else "Semantic Scholar")
-                out["note"] = (out["note"] + "；" if out["note"] else "") + \
-                    f"着陆页反爬（HTTP {status}），但 {label} 注册元数据核验一致——存在性已确认"
+                label = "DOI" if doi_matched else "arXiv" if arxiv_matched else "Semantic Scholar"
+                out["note"] = (
+                    out["note"] + "；" if out["note"] else ""
+                ) + f"着陆页反爬（HTTP {status}），但 {label} 注册元数据核验一致——存在性已确认"
                 # v1.5 二轮评审 P1：元数据本身判 partial（相似度 0.50-0.82）时，
                 # 救回同样不得给 verified——与 200 路径末尾的降级不变量保持一致，
                 # 防"疑似错引"借反爬救回混进 verified（进而流入 bibtex/strict CI）
-                if (out["tier"] in _ROOT.TRUSTED_TIERS and not _ROOT.missing_fields(ref)
-                        and doi_adj != "partial" and arxiv_adj != "partial"):
+                if (
+                    out["tier"] in _ROOT.TRUSTED_TIERS
+                    and not _ROOT.missing_fields(ref)
+                    and doi_adj != "partial"
+                    and arxiv_adj != "partial"
+                ):
                     out["verdict"] = "verified"
                 else:
                     out["verdict"] = "partial"
                 # v4.1.0：撤稿族与 EoC 同闸——反爬救回不得把带通告的文献盖成 verified
-                if (retracted or (out["checks"].get("retraction") or {}).get("nature")
-                        == "expression_of_concern") and out["verdict"] == "verified":
+                if (
+                    retracted
+                    or (out["checks"].get("retraction") or {}).get("nature")
+                    == "expression_of_concern"
+                ) and out["verdict"] == "verified":
                     out["verdict"] = "partial"
                     out["needs_human_check"] = True
                 return out
@@ -617,11 +747,19 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
             # 评审修正（P0）：仅当元数据核验未能确认存在时才允许此判定——
             # 官方 API 刚确认过存在时，脏 URL 的 404 不得反转成 invalid；
             # 此逻辑仅适用于解析器域名，普通网页 404 仍是 unreachable
-            elif status == 404 and not (doi_matched or arxiv_matched) and re.match(
-                    r"^https?://(?:www\.|export\.)?arxiv\.org/(?:abs|pdf)/", url, re.IGNORECASE):
-                out.update(verdict="invalid", needs_human_check=True,
-                           note=(out["note"] + "；" if out["note"] else "") +
-                                "arXiv 官方站对该 ID 返回 404（官方库查无）→ 疑似编造引用")
+            elif (
+                status == 404
+                and not (doi_matched or arxiv_matched)
+                and re.match(
+                    r"^https?://(?:www\.|export\.)?arxiv\.org/(?:abs|pdf)/", url, re.IGNORECASE
+                )
+            ):
+                out.update(
+                    verdict="invalid",
+                    needs_human_check=True,
+                    note=(out["note"] + "；" if out["note"] else "")
+                    + "arXiv 官方站对该 ID 返回 404（官方库查无）→ 疑似编造引用",
+                )
                 return out
             # v5.6.0 审计修复（T2 实战回归）：PubMed 落地页对不存在 PMID 开始返回
             # 真 404——unreachable 提前 return 不得屏蔽 E-utilities 权威存在性判定
@@ -631,11 +769,18 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
             if m_pm:
                 pmid_ok, pmid_note = _ROOT.pubmed_pmid_exists(m_pm.group(1), timeout)
                 if not pmid_ok:
-                    out.update(verdict="invalid", needs_human_check=True,
-                               note=(out["note"] + "；" if out["note"] else "") + pmid_note)
+                    out.update(
+                        verdict="invalid",
+                        needs_human_check=True,
+                        note=(out["note"] + "；" if out["note"] else "") + pmid_note,
+                    )
                     return out
-            out.update(verdict="unreachable", needs_human_check=True,
-                       note=(out["note"] + "；" if out["note"] else "") + "可能反爬/临时故障，不等于不存在")
+            out.update(
+                verdict="unreachable",
+                needs_human_check=True,
+                note=(out["note"] + "；" if out["note"] else "")
+                + "可能反爬/临时故障，不等于不存在",
+            )
             # v1.5 存档兜底：不可达 ≠ 不存在，附 Wayback 存档链给人工复核做对照
             wb = _ROOT.wayback_available(url, timeout)
             out["checks"]["wayback"] = {"archive_found": bool(wb)}
@@ -646,17 +791,25 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
         if m:
             pmid_ok, pmid_note = _ROOT.pubmed_pmid_exists(m.group(1), timeout)
             if not pmid_ok:
-                out.update(verdict="invalid", needs_human_check=True,
-                           note=(out["note"] + "；" if out["note"] else "") + pmid_note)
+                out.update(
+                    verdict="invalid",
+                    needs_human_check=True,
+                    note=(out["note"] + "；" if out["note"] else "") + pmid_note,
+                )
                 return out
             out["note"] = (out["note"] + "；" if out["note"] else "") + pmid_note
             # v3.4 池:PMID 元数据核验(标题+期刊一致性)——此前 PMID-only 引用
             # 仅查存在性,真 PMID+假标题/假期刊拼接可过 verified(评审缺口)
-            if not offline and (str(ref.get("title") or "").strip() or
-                                str(ref.get("source") or "").strip()):
+            if not offline and (
+                str(ref.get("title") or "").strip() or str(ref.get("source") or "").strip()
+            ):
                 padj, pnote, pmatched = _ROOT.pmid_metadata_match(
-                    m.group(1), _ROOT.clean_title(str(ref.get("title") or "")),
-                    str(ref.get("source") or ""), ref.get("year"), timeout)
+                    m.group(1),
+                    _ROOT.clean_title(str(ref.get("title") or "")),
+                    str(ref.get("source") or ""),
+                    ref.get("year"),
+                    timeout,
+                )
                 out["checks"]["pmid_metadata"] = {"matched": pmatched, "adjust": padj}
                 if pnote:
                     out["note"] = (out["note"] + "；" if out["note"] else "") + pnote
@@ -668,21 +821,34 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
                     # 卷期页锚定若唯一命中**同一 PMID**——注册库亲自确认了
                     # 「该组卷期页 ↔ 该 PMID」，声称引用恰好给出同组定位器，
                     # 标题差异纯属翻译——证据充分，解除终局 partial 封顶
-                    if "跨语言标题无法机器比对" in pnote and out["source"] \
-                            and ref.get("volume") and ref.get("year"):
+                    if (
+                        "跨语言标题无法机器比对" in pnote
+                        and out["source"]
+                        and ref.get("volume")
+                        and ref.get("year")
+                    ):
                         la, ln, lm_, lp, le = _ROOT.pubmed_locator_lookup(
-                            out["source"], ref.get("year"), ref.get("volume"),
-                            ref.get("issue"), ref.get("pages"), max(timeout, 15.0),
-                            claimed_title=str(ref.get("title") or ""))
+                            out["source"],
+                            ref.get("year"),
+                            ref.get("volume"),
+                            ref.get("issue"),
+                            ref.get("pages"),
+                            max(timeout, 15.0),
+                            claimed_title=str(ref.get("title") or ""),
+                        )
                         out["checks"]["pubmed_locator"] = {
-                            "ran": True, "matched": lm_, "pmid": lp or None,
-                            "network_error": le}
+                            "ran": True,
+                            "matched": lm_,
+                            "pmid": lp or None,
+                            "network_error": le,
+                        }
                         if ln:
                             out["note"] = (out["note"] + "；" if out["note"] else "") + ln
                         if lm_ and str(lp) == str(out["pmid"]):
                             out["checks"]["pmid_metadata"]["cross_lang_corroborated"] = True
-                            out["note"] = (out["note"] + "；" if out["note"] else "") + \
-                                "跨语言标题经卷期页锚定佐证（同一 PMID 唯一命中）——语言差异不作为编造依据"
+                            out["note"] = (
+                                out["note"] + "；" if out["note"] else ""
+                            ) + "跨语言标题经卷期页锚定佐证（同一 PMID 唯一命中）——语言差异不作为编造依据"
                         else:
                             out.update(verdict="partial", needs_human_check=True)
                     else:
@@ -694,23 +860,27 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
             out["checks"]["openalex"] = {"ran": True, "confirmed": "确认存在" in oa_note}
             if oa_note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + oa_note
-            s2t_matched, s2t_note = _ROOT.s2_title_confirm(_ROOT.clean_title(str(ref.get("title") or "")), timeout)
+            s2t_matched, s2t_note = _ROOT.s2_title_confirm(
+                _ROOT.clean_title(str(ref.get("title") or "")), timeout
+            )
             out["checks"]["s2_title"] = {"matched": s2t_matched}
             if s2t_note:
                 out["note"] = (out["note"] + "；" if out["note"] else "") + s2t_note
 
     # v3.0.0 L3 引文语境层：verified 的 DOI 引文追加学界评价（默认开,--no-contexts 关）
-    if (not offline and _ROOT._OPTS.get("contexts", True) and out["doi"]
-            and _ROOT.DOI_RE.match(out["doi"])):
+    if (
+        not offline
+        and _ROOT._OPTS.get("contexts", True)
+        and out["doi"]
+        and _ROOT.DOI_RE.match(out["doi"])
+    ):
         ctx = _ROOT.s2_citation_contexts(out["doi"], timeout)
-        out["checks"]["citation_contexts"] = {
-            "ran": True, "cited_by": ctx.get("cited_by", 0)}
+        out["checks"]["citation_contexts"] = {"ran": True, "cited_by": ctx.get("cited_by", 0)}
         if ctx:
             out["citation_contexts"] = ctx
             n = ctx["cited_by"]
             cov = ctx.get("coverage", 0)
-            note_ctx = (f"学界评价：被引 {'≥' if n >= 30 else ''}{n} 次"
-                        f"（语境覆盖率 {cov:.0%}）")
+            note_ctx = f"学界评价：被引 {'≥' if n >= 30 else ''}{n} 次" f"（语境覆盖率 {cov:.0%}）"
             if ctx["samples"]:
                 note_ctx += "；后续文献如是以引用：《" + ctx["samples"][0]["citing_title"] + "》"
             out["note"] = (out["note"] + "；" if out["note"] else "") + note_ctx
@@ -727,10 +897,13 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
         # v4.8.0 落地页题名对照（EB/OL 靶型）：partial 因非权威层/缺字段而
         # URL 可达时，抽页面题名对照——一致=「这条 URL 讲的就是这篇」的存在性
         # 证据，注记补强不改判定（partial 仍转人工；误确认代价=多一次人工复核）
-        if (out["url"] and not offline and not retracted
-                and (out.get("checks", {}).get("url") or {}).get("reachable")):
-            lt_note, lt_confirmed = _ROOT.landing_title_check(out["url"],
-                                                        out["title"], timeout)
+        if (
+            out["url"]
+            and not offline
+            and not retracted
+            and (out.get("checks", {}).get("url") or {}).get("reachable")
+        ):
+            lt_note, lt_confirmed = _ROOT.landing_title_check(out["url"], out["title"], timeout)
             out["checks"]["landing"] = {"ran": True, "confirmed": lt_confirmed}
             if lt_confirmed:
                 why.append("落地页题名对照一致（存在性佐证）")
@@ -750,16 +923,20 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
         out["needs_human_check"] = True
 
     # v3.4 外部独测合并:PMID 元数据 partial 与 DOI/arXiv 同闸——降级不得被终局覆盖
-    if (out.get("checks", {}).get("pmid_metadata", {}) or {}).get("adjust") == "partial" \
-            and not (out.get("checks", {}).get("pmid_metadata", {}) or {}).get(
-                "cross_lang_corroborated") \
-            and out["verdict"] == "verified":
+    if (
+        (out.get("checks", {}).get("pmid_metadata", {}) or {}).get("adjust") == "partial"
+        and not (out.get("checks", {}).get("pmid_metadata", {}) or {}).get(
+            "cross_lang_corroborated"
+        )
+        and out["verdict"] == "verified"
+    ):
         out["verdict"] = "partial"
     # v4.1.0：撤稿族与 EoC 同闸降级（EoC=编辑关注通告，证据效力存疑转人工；
     # 更正/勘误不降级——仅提示注记）
     _ret_chk = out.get("checks", {}).get("retraction") or {}
-    if (retracted or _ret_chk.get("nature") == "expression_of_concern") \
-            and out["verdict"] == "verified":
+    if (retracted or _ret_chk.get("nature") == "expression_of_concern") and out[
+        "verdict"
+    ] == "verified":
         out["verdict"] = "partial"
         out["needs_human_check"] = True
     elif _ret_chk.get("nature") == "expression_of_concern":
@@ -770,8 +947,9 @@ def _verify_one_impl(ref: dict, idx: int, offline: bool, timeout: float, medical
     # 诚实起见 verified 封顶为 partial（避免离线盖章"已验证"）
     if offline and out["verdict"] == "verified":
         out["verdict"] = "partial"
-        out["note"] = (out["note"] + "；" if out["note"] else "") + \
-            "offline 模式最高判 partial（可达性未验证）"
+        out["note"] = (
+            out["note"] + "；" if out["note"] else ""
+        ) + "offline 模式最高判 partial（可达性未验证）"
     return out
 
 
@@ -797,8 +975,10 @@ def annotate_preprint_upgrades(results: list, timeout: float) -> int:
         if not ax or (r.get("doi") or "").strip():
             continue
         try:
-            url = (f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{quote(ax)}"
-                   f"?fields=externalIds,venue,year")
+            url = (
+                f"https://api.semanticscholar.org/graph/v1/paper/arXiv:{quote(ax)}"
+                f"?fields=externalIds,venue,year"
+            )
             if _ROOT._cb_open(url):
                 continue
             _ROOT._s2_rate_wait()
@@ -817,7 +997,8 @@ def annotate_preprint_upgrades(results: list, timeout: float) -> int:
                 r["note"] = ((r.get("note") + "；") if r.get("note") else "") + (
                     f"该预印本已登记正式发表（{venue or '期刊版'}"
                     f"{' ' + str(d.get('year')) if d.get('year') else ''}，"
-                    f"DOI:{jdoi}）——建议引用正式版（preprint→published 升级提示）")
+                    f"DOI:{jdoi}）——建议引用正式版（preprint→published 升级提示）"
+                )
                 n += 1
         except urllib.error.HTTPError:
             # 审计修复:HTTP 层失败（404 未收录/429 限流）不触发熔断——否则连续
@@ -836,24 +1017,27 @@ def check_document(text: str, results: list, anchor_threshold: float = 0.34) -> 
     首跑实锤：69 处"引用"含 16 个清单标签、覆盖度假 100%）。"""
     _m = _ROOT._REF_SECTION_RE.search(text)
     if _m:
-        text = text[:_m.start()]
+        text = text[: _m.start()]
     cits = _ROOT.extract_citations(text)
     out = []
     cited_all = set()  # 复合标记（[1-3]/[1,3]）的全部绑定条目——审计 P1：
     # 原实现每标记只记首绑，医学高频的 [2-5] 会让条目 2-4 被误报孤儿
     for c in cits:
         b = _ROOT.bind_citation(c, results)
-        for r in (b["bound"] or []):
+        for r in b["bound"] or []:
             if r is not None and r.get("index") is not None:
                 cited_all.add(r["index"])
         for r in (b["bound"] or [None])[:1]:
             ar = _ROOT.anchor_rate(c["sentence"], r) if r else 0.0
-            entry = {"marker": c["marker"], "sentence": c["sentence"][:300],
-                     "ref_index": (r or {}).get("index"),
-                     "ref_verdict": (r or {}).get("verdict"),
-                     "anchor_rate": round(ar, 3),
-                     "anchor": "ok" if ar >= anchor_threshold else "low",
-                     "bound": bool(r)}
+            entry = {
+                "marker": c["marker"],
+                "sentence": c["sentence"][:300],
+                "ref_index": (r or {}).get("index"),
+                "ref_verdict": (r or {}).get("verdict"),
+                "anchor_rate": round(ar, 3),
+                "anchor": "ok" if ar >= anchor_threshold else "low",
+                "bound": bool(r),
+            }
             if not r:
                 entry["note"] = "未绑定:正文中引用了清单外的编号/条目"
                 entry["anchor"] = "n/a"
@@ -865,20 +1049,29 @@ def check_document(text: str, results: list, anchor_threshold: float = 0.34) -> 
     # 写作规范问题（漏引或冗列），不是编造——advisory 级，绝不改判定。
     cited_idx = {e["ref_index"] for e in out if e.get("ref_index") is not None}
     cited_idx |= cited_all
-    listed_idx = sorted({r.get("index") for r in results
-                         if r.get("index") is not None})
+    listed_idx = sorted({r.get("index") for r in results if r.get("index") is not None})
     uncited = sorted(i for i in listed_idx if i not in cited_idx)
-    coverage = (round(len([i for i in listed_idx if i in cited_idx])
-                      / len(listed_idx), 2) if listed_idx else 0.0)
-    return {"citations": out, "n_citations": len(out),
-            "n_unbound": len(unbound), "n_low_anchor": len(low),
-            "anchor_threshold": anchor_threshold,
-            "n_listed": len(listed_idx), "n_uncited": len(uncited),
-            "uncited_refs": uncited, "coverage": coverage,
-            "note": ("锚词率=引文句与被引标题的内容词重叠(阈值 %.2f);low≠错引,"
-                     "是语义层人工复核候选;未引用条目=写作规范建议(漏引或冗列),"
-                     "非真伪问题" % anchor_threshold)}
+    coverage = (
+        round(len([i for i in listed_idx if i in cited_idx]) / len(listed_idx), 2)
+        if listed_idx
+        else 0.0
+    )
+    return {
+        "citations": out,
+        "n_citations": len(out),
+        "n_unbound": len(unbound),
+        "n_low_anchor": len(low),
+        "anchor_threshold": anchor_threshold,
+        "n_listed": len(listed_idx),
+        "n_uncited": len(uncited),
+        "uncited_refs": uncited,
+        "coverage": coverage,
+        "note": (
+            "锚词率=引文句与被引标题的内容词重叠(阈值 %.2f);low≠错引,"
+            "是语义层人工复核候选;未引用条目=写作规范建议(漏引或冗列),"
+            "非真伪问题" % anchor_threshold
+        ),
+    }
 
 
 # ═══ v3.9.0 结构化错误码(errorHandling):五态之上的机器可读细分 ═══
-

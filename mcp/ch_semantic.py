@@ -20,8 +20,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-
-
 _ROOT = None  # 由 verify_refs 壳注入
 
 
@@ -30,8 +28,7 @@ def _bind(root):
     _ROOT = root
 
 
-SEMANTIC_SUPPORTS = ("supported", "partial", "not_in_source", "contradicted",
-                     "unclear")
+SEMANTIC_SUPPORTS = ("supported", "partial", "not_in_source", "contradicted", "unclear")
 _SEMANTIC_CAP = ("not_in_source", "contradicted")
 
 
@@ -52,10 +49,12 @@ def build_semantic_audit(ref: dict):
         note = note + "；" + own_note
     else:
         note = note or own_note
-    return {"claim": str(s.get("claim") or "").strip(),
-            "support": support,
-            "quote": str(s.get("quote") or "").strip(),
-            "note": note}
+    return {
+        "claim": str(s.get("claim") or "").strip(),
+        "support": support,
+        "quote": str(s.get("quote") or "").strip(),
+        "note": note,
+    }
 
 
 def apply_semantic_cap(results: list) -> None:
@@ -73,10 +72,14 @@ def apply_semantic_cap(results: list) -> None:
         if r.get("verdict") == "verified":
             r["verdict"] = "partial"
         r["needs_human_check"] = True
-        why = ("来源未包含所引论断" if sa.get("support") == "not_in_source"
-               else "来源内容与该论断相矛盾")
-        r["note"] = ((r.get("note") + "；") if r.get("note") else "") + \
-            f"语义层判定 {sa.get('support')}（{why}）→ 封顶 partial，需人工复核"
+        why = (
+            "来源未包含所引论断"
+            if sa.get("support") == "not_in_source"
+            else "来源内容与该论断相矛盾"
+        )
+        r["note"] = (
+            (r.get("note") + "；") if r.get("note") else ""
+        ) + f"语义层判定 {sa.get('support')}（{why}）→ 封顶 partial，需人工复核"
 
 
 def apply_l4_cascade(results: list, timeout: float) -> None:
@@ -87,6 +90,7 @@ def apply_l4_cascade(results: list, timeout: float) -> None:
     verified，不动 invalid）；未配置 --judge-url 时零网络调用零行为变化（审核安全）。"""
     if not _ROOT.judge_endpoint_available():
         return
+
     # v3.9.0 位 B(fastjudge_design 落地):--fast-judge-url 时先对学生模型预筛
     # (小型分类器延迟极低),按「高置信 REFUTES 优先」排序后再做贵的官方文本升级——
     # 排序路由不跳过任何条目(诚实:总核验量不变,变的是处理次序与可观测性)。
@@ -95,13 +99,16 @@ def apply_l4_cascade(results: list, timeout: float) -> None:
             return 0  # 无预筛:保持原顺序
         sa = r.get("semantic_audit") or {}
         claim = str(sa.get("claim") or "").strip()
-        src = "\n".join(x for x in (str(r.get("title") or ""),
-                                    str(r.get("journal") or "")) if x.strip())
+        src = "\n".join(
+            x for x in (str(r.get("title") or ""), str(r.get("journal") or "")) if x.strip()
+        )
         if not claim or len(src.strip()) < 20:
             return 0
         fj = _ROOT.fast_judge_vote(claim, src, timeout=timeout)
         r.setdefault("checks", {})["fast_judge_prescreen"] = {
-            "label": fj.get("label"), "prob": fj.get("prob")}
+            "label": fj.get("label"),
+            "prob": fj.get("prob"),
+        }
         if fj.get("label") == "REFUTES" and float(fj.get("prob") or 0) >= 0.95:
             return 2  # 高置信反驳:疑似错引,升级复核优先级最高
         return 1
@@ -123,7 +130,8 @@ def apply_l4_cascade(results: list, timeout: float) -> None:
         except Exception as e:
             try:
                 r.setdefault("checks", {})["l4_evidence_cascade"] = {
-                    "degraded": f"cascade-error:{type(e).__name__}"}
+                    "degraded": f"cascade-error:{type(e).__name__}"
+                }
             except Exception:
                 pass
     cands.sort(key=lambda t: -t[0])
@@ -150,19 +158,27 @@ def apply_l4_cascade(results: list, timeout: float) -> None:
                 continue
             chk = r.setdefault("checks", {})
             if not text:
-                chk["l4_evidence_cascade"] = {"trigger": sa.get("support"),
-                                              "evidence_source": src_name,
-                                              "degraded": "no-text"}
+                chk["l4_evidence_cascade"] = {
+                    "trigger": sa.get("support"),
+                    "evidence_source": src_name,
+                    "degraded": "no-text",
+                }
                 continue
             hits = _ROOT.retrieve_evidence(claim, text, k=2)
             if not hits:
-                chk["l4_evidence_cascade"] = {"trigger": sa.get("support"),
-                                              "evidence_source": src_name,
-                                              "degraded": "no-chunks"}
+                chk["l4_evidence_cascade"] = {
+                    "trigger": sa.get("support"),
+                    "evidence_source": src_name,
+                    "degraded": "no-chunks",
+                }
                 continue
             jd = _ROOT.judge_claim_via_endpoint(claim, "\n\n".join(hits), timeout=timeout)
-            rec = {"trigger": sa.get("support"), "evidence_source": src_name,
-                   "top_chunk_chars": len(hits[0]), "judge_verdict": jd.get("verdict")}
+            rec = {
+                "trigger": sa.get("support"),
+                "evidence_source": src_name,
+                "top_chunk_chars": len(hits[0]),
+                "judge_verdict": jd.get("verdict"),
+            }
             if _ROOT._OPTS.get("nli_url"):
                 no = _ROOT.nli_vote("\n\n".join(hits), claim, timeout=timeout)
                 agg = aggregate_l2(jd.get("verdict") or "NEI", no)
@@ -171,11 +187,15 @@ def apply_l4_cascade(results: list, timeout: float) -> None:
             if jd.get("degraded"):
                 rec["degraded"] = jd["degraded"]
             chk["l4_evidence_cascade"] = rec
-            add = lambda s: r.update({"note": ((r.get("note") + "；") if r.get("note") else "") + s})
+            add = lambda s: r.update(
+                {"note": ((r.get("note") + "；") if r.get("note") else "") + s}
+            )
             if rec.get("l2_confidence") == "contested":
                 r["needs_human_check"] = True
-                add(f"L2 分歧：裁判判 {jd.get('verdict')} 而 NLI 第三票判 {rec.get('nli')}"
-                    "→ 标记人工复核（不自动翻案）")
+                add(
+                    f"L2 分歧：裁判判 {jd.get('verdict')} 而 NLI 第三票判 {rec.get('nli')}"
+                    "→ 标记人工复核（不自动翻案）"
+                )
             if jd.get("verdict") == "SUPPORTS":
                 add("L4 升级：官方文本段落级证据经外置裁判判定支持（语义封顶维持，供人工复核参考）")
             elif jd.get("verdict") == "CONTRADICTS":
@@ -186,7 +206,8 @@ def apply_l4_cascade(results: list, timeout: float) -> None:
         except Exception as e:  # 单条失败不拖垮整跑
             try:
                 r.setdefault("checks", {})["l4_evidence_cascade"] = {
-                    "degraded": f"cascade-error:{type(e).__name__}"}
+                    "degraded": f"cascade-error:{type(e).__name__}"
+                }
             except Exception:
                 pass
 
@@ -201,8 +222,11 @@ def fast_judge_vote(claim: str, source: str, timeout: float = 30) -> dict:
     try:
         inp = f"SENTENCE: {claim[:800]}\n\nSOURCE:\n{(source or '')[:6000]}"
         body = json.dumps({"input": inp}).encode()
-        req = urllib.request.Request(url.rstrip("/") + "/api/fastjudge", data=body,
-                                     headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            url.rstrip("/") + "/api/fastjudge",
+            data=body,
+            headers={"Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8", "ignore"))
     except Exception:
@@ -230,15 +254,17 @@ def apply_fast_judge(results: list, timeout: float) -> None:
             chk = (r.get("checks") or {}).get("l4_evidence_cascade") or {}
             if chk.get("judge_verdict"):
                 continue  # L4 已有官方文本判定——预筛让位
-            src = "\n".join(x for x in (str(r.get("title") or ""),
-                                        str(r.get("journal") or "")) if x.strip())
+            src = "\n".join(
+                x for x in (str(r.get("title") or ""), str(r.get("journal") or "")) if x.strip()
+            )
             if len(src.strip()) < 20:
                 continue  # 无元数据底稿——预筛弃权
             fj = _ROOT.fast_judge_vote(claim, src, timeout=timeout)
             rec = {"label": fj.get("label"), "prob": fj.get("prob")}
             if fj.get("label") == "SUPPORTS" and float(fj.get("prob") or 0) >= thr:
-                r["note"] = ((r.get("note") + "；") if r.get("note") else "") + \
-                    f"fast-judge 预筛倾向支持（p={float(fj['prob']):.2f}，供人工参考，非判定）"
+                r["note"] = (
+                    (r.get("note") + "；") if r.get("note") else ""
+                ) + f"fast-judge 预筛倾向支持（p={float(fj['prob']):.2f}，供人工参考，非判定）"
                 rec["action"] = "note-only"
             r.setdefault("checks", {})["fast_judge"] = rec
         except Exception:
@@ -247,13 +273,15 @@ def apply_fast_judge(results: list, timeout: float) -> None:
 
 def fetch_pubmed_abstract(pmid: str, timeout: float) -> str:
     """L4 Phase1 证据源：E-utilities efetch 取摘要（夜间雷达管线同源）。失败返回 ""。"""
-    u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi"
-         + _ROOT._ncbi_qs(f"?db=pubmed&id={pmid}&rettype=abstract&retmode=text"))
+    u = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/efetch.fcgi" + _ROOT._ncbi_qs(
+        f"?db=pubmed&id={pmid}&rettype=abstract&retmode=text"
+    )
     if _ROOT._cb_open(u):
         return ""
     try:
-        req = urllib.request.Request(u, headers={
-            "User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+        req = urllib.request.Request(
+            u, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"}
+        )
         with urllib.request.urlopen(req, timeout=timeout) as r:
             _ROOT._cb_record(u, False)
             return r.read().decode("utf-8", "ignore")[:4000]
@@ -265,20 +293,24 @@ def fetch_pubmed_abstract(pmid: str, timeout: float) -> str:
 def fetch_fulltext(arxiv_id: str, timeout: float) -> str:
     """L4 Phase2 全文源：arXiv HTML（ar5iv 镜像,优先）/abs 页兜底。失败返回 ""。"""
     aid = re.sub(r"v\d+$", "", arxiv_id)
-    for url in (f"https://ar5iv.labs.arxiv.org/html/{aid}",
-                f"https://arxiv.org/abs/{aid}"):
+    for url in (f"https://ar5iv.labs.arxiv.org/html/{aid}", f"https://arxiv.org/abs/{aid}"):
         if _ROOT._cb_open(url):
             continue
         for attempt in range(2):  # v3.1：传输错误单次重试（弱网出口 SSL 间歇断流实测）
             try:
-                req = urllib.request.Request(url, headers={
-                    "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION})"})
+                req = urllib.request.Request(
+                    url,
+                    headers={
+                        "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION})"
+                    },
+                )
                 with urllib.request.urlopen(req, timeout=timeout) as r:
                     _ROOT._cb_record(url, False)
                     text = r.read().decode("utf-8", "ignore")
                 # 粗剥 HTML 标签
-                return re.sub(r"<[^>]+>", " ", re.sub(r"<(script|style)[^>]*>.*?</\1>",
-                                                      " ", text, flags=re.S))[:120000]
+                return re.sub(
+                    r"<[^>]+>", " ", re.sub(r"<(script|style)[^>]*>.*?</\1>", " ", text, flags=re.S)
+                )[:120000]
             except Exception:
                 if attempt == 0:
                     time.sleep(2)
@@ -292,13 +324,17 @@ def _embed_ollama(texts: list) -> list:
     v3.1：ollama+bge-m3 对部分短文本产 NaN（500 unsupported value: NaN，实测约 9%
     的短科学声明）——单条 500 时对该条用「文本加倍」变体重试（语义嵌入仍有效），
     再失败才整批降级。"""
+
     def _call(inp):
         payload = json.dumps({"model": "bge-m3", "input": inp}).encode()
-        req = urllib.request.Request("http://127.0.0.1:11434/api/embed",
-                                     data=payload,
-                                     headers={"Content-Type": "application/json"})
+        req = urllib.request.Request(
+            "http://127.0.0.1:11434/api/embed",
+            data=payload,
+            headers={"Content-Type": "application/json"},
+        )
         with urllib.request.urlopen(req, timeout=60) as r:
             return json.loads(r.read().decode()).get("embeddings") or []
+
     try:
         try:
             return _call(texts)
@@ -325,10 +361,12 @@ def retrieve_evidence(query: str, fulltext: str, k: int = 2) -> list:
     embs = _ROOT._embed_ollama([query] + chunks)
     if len(embs) == len(chunks) + 1 and embs[0]:
         import math
+
         q = embs[0]
         norms = [math.sqrt(sum(x * x for x in e)) or 1.0 for e in embs]
-        scores = [sum(a * b for a, b in zip(q, e)) / (norms[0] * n)
-                  for e, n in zip(embs[1:], norms[1:])]
+        scores = [
+            sum(a * b for a, b in zip(q, e)) / (norms[0] * n) for e, n in zip(embs[1:], norms[1:])
+        ]
         top = sorted(range(len(chunks)), key=lambda i: -scores[i])[:k]
         return [chunks[i] for i in top]
     return [chunks[i] for i in _ROOT._tfidf_top(query, chunks, k)]
@@ -341,18 +379,19 @@ def nli_vote(premise: str, hypothesis: str, timeout: float = 30) -> dict:
     if not url:
         return {"label": None}
     try:
-        body = json.dumps({"premise": (premise or "")[:6000],
-                           "hypothesis": (hypothesis or "")[:1000]}).encode()
-        req = urllib.request.Request(url.rstrip("/") + "/api/nli", data=body,
-                                     headers={"Content-Type": "application/json"})
+        body = json.dumps(
+            {"premise": (premise or "")[:6000], "hypothesis": (hypothesis or "")[:1000]}
+        ).encode()
+        req = urllib.request.Request(
+            url.rstrip("/") + "/api/nli", data=body, headers={"Content-Type": "application/json"}
+        )
         with urllib.request.urlopen(req, timeout=timeout) as r:
             return json.loads(r.read().decode("utf-8", "ignore"))
     except Exception:
         return {"label": None}
 
 
-_NLI_MAP = {"entailment": "SUPPORTS", "contradiction": "CONTRADICTS",
-            "neutral": "NEI"}
+_NLI_MAP = {"entailment": "SUPPORTS", "contradiction": "CONTRADICTS", "neutral": "NEI"}
 
 
 def aggregate_l2(gen_verdict: str, nli_out: dict) -> dict:
@@ -391,21 +430,32 @@ def judge_claim_via_endpoint(claim: str, evidence: str, timeout: float = 60) -> 
     if not _ROOT.judge_endpoint_available():
         return {"verdict": "NEI", "degraded": "no-judge-endpoint"}
     labels = ("SUPPORTS", "CONTRADICTS", "NEI")
-    prompt = ("你是证据核查裁判。给定 CLAIM 与 EVIDENCE,只输出三选一标签：\n"
-              "SUPPORTS（证据支持声明）/ CONTRADICTS（证据反驳声明）/ NEI（证据不足）。\n\n"
-              f"CLAIM: {claim[:800]}\n\nEVIDENCE: {evidence[:3000]}\n\n标签:")
+    prompt = (
+        "你是证据核查裁判。给定 CLAIM 与 EVIDENCE,只输出三选一标签：\n"
+        "SUPPORTS（证据支持声明）/ CONTRADICTS（证据反驳声明）/ NEI（证据不足）。\n\n"
+        f"CLAIM: {claim[:800]}\n\nEVIDENCE: {evidence[:3000]}\n\n标签:"
+    )
     api = _ROOT._OPTS["judge_url"].rstrip("/")
     model = _ROOT._OPTS.get("judge_model", "qwen3.8-27b")
     try:
         if api.endswith("/v1"):
-            body = json.dumps({"model": model,
-                               "messages": [{"role": "user", "content": prompt + " /no_think"}],
-                               "temperature": 0, "max_tokens": 96}).encode()
-            req = urllib.request.Request(api + "/chat/completions", data=body,
-                                         headers={"Content-Type": "application/json"})
+            body = json.dumps(
+                {
+                    "model": model,
+                    "messages": [{"role": "user", "content": prompt + " /no_think"}],
+                    "temperature": 0,
+                    "max_tokens": 96,
+                }
+            ).encode()
+            req = urllib.request.Request(
+                api + "/chat/completions", data=body, headers={"Content-Type": "application/json"}
+            )
             with urllib.request.urlopen(req, timeout=timeout) as r:
-                msg = (json.loads(r.read().decode("utf-8", "ignore"))
-                       .get("choices", [{}])[0].get("message", {}))
+                msg = (
+                    json.loads(r.read().decode("utf-8", "ignore"))
+                    .get("choices", [{}])[0]
+                    .get("message", {})
+                )
             tag = _scan_label(msg.get("content") or "", labels)
             if tag:
                 return {"verdict": tag}
@@ -413,17 +463,28 @@ def judge_claim_via_endpoint(claim: str, evidence: str, timeout: float = 60) -> 
             tag = _scan_label(reas, labels)
             if tag:
                 return {"verdict": tag, "degraded": "parsed-from-reasoning"}
-            return {"verdict": "NEI",
-                    "degraded": "unparsed-reply:" + (msg.get("content") or reas)[:40]}
-        schema = {"type": "object",
-                  "properties": {"label": {"type": "string", "enum": list(labels)}},
-                  "required": ["label"]}
-        body = json.dumps({"model": model,
-                           "messages": [{"role": "user", "content": prompt}],
-                           "think": False, "stream": False, "format": schema,
-                           "options": {"temperature": 0, "num_predict": 32}}).encode()
-        req = urllib.request.Request(api + "/api/chat", data=body,
-                                     headers={"Content-Type": "application/json"})
+            return {
+                "verdict": "NEI",
+                "degraded": "unparsed-reply:" + (msg.get("content") or reas)[:40],
+            }
+        schema = {
+            "type": "object",
+            "properties": {"label": {"type": "string", "enum": list(labels)}},
+            "required": ["label"],
+        }
+        body = json.dumps(
+            {
+                "model": model,
+                "messages": [{"role": "user", "content": prompt}],
+                "think": False,
+                "stream": False,
+                "format": schema,
+                "options": {"temperature": 0, "num_predict": 32},
+            }
+        ).encode()
+        req = urllib.request.Request(
+            api + "/api/chat", data=body, headers={"Content-Type": "application/json"}
+        )
         with urllib.request.urlopen(req, timeout=timeout) as r:
             msg = json.loads(r.read().decode("utf-8", "ignore")).get("message", {})
         out = (msg.get("content") or msg.get("thinking") or "").strip()
@@ -437,5 +498,3 @@ def judge_claim_via_endpoint(claim: str, evidence: str, timeout: float = 60) -> 
         return {"verdict": "NEI", "degraded": "unparsed-reply:" + str(out)[:40]}
     except Exception as e:
         return {"verdict": "NEI", "degraded": f"endpoint-error:{type(e).__name__}"}
-
-

@@ -11,6 +11,7 @@
     "test_v60200.py",
     "test_v60300.py",
     "test_v60400.py",
-    "test_v60500.py"
+    "test_v60500.py",
+    "test_v60600.py"
   ]
 }

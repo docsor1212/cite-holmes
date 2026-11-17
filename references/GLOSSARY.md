@@ -79,7 +79,7 @@ _Avoid_: 质量分、字段分
 
 ## 错误码（`error_codes` 字段，12 类，机器可读）
 
-错误码是五态之上的**原因细分**（如 E_DOU_NOT_FOUND / E_TITLE_MISMATCH / E_CROSS_LANG），
+错误码是五态之上的**原因细分**（如 E_DOI_NOT_FOUND / E_TITLE_MISMATCH / E_CROSS_LANG），
 人话翻译见 `--explain N` 输出。
 _Avoid_: 错误类型、异常码
 

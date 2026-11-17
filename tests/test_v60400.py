@@ -119,20 +119,48 @@ class M5_FidelityLabels(unittest.TestCase):
                          "DOI 主分支+期刊作者分支+PMID 分支三处标签")
 
     def test_label_is_annotation_only(self):
-        # 宪法锁：fidelity 标签只出现在 note 字符串——标签行要么字面
-        # "partial"，要么由 jadj/aadj 变量承载（其赋值处必为 "partial"）；
-        # 任何标签行不得携带 invalid/空串判定
+        # 宪法锁（v6.6.0 F64 改 AST 形态——格式化器重排不再破锁）：携带
+        # fidelity 标签的 return 元组，其首元素（判定域）只允许
+        # "partial" 字面量 / jadj / aadj 变量 / 其 BoolOp 或 IfExp——
+        # 绝不允许 invalid/空串；jadj/aadj 赋值处必须字面 "partial"。
+        import ast
         src = open(os.path.join(SK, "scripts", "ch_registry.py"),
                    encoding="utf-8").read()
         self.assertIn('jadj = "partial"', src)
         self.assertIn('aadj = "partial"', src)
-        for line in src.splitlines():
-            if "[元数据漂移:" in line:
-                ok = ('"partial"' in line
-                      or "(jadj or aadj)" in line)
-                self.assertTrue(ok, f"标签行判定域越界: {line.strip()[:80]}")
-                self.assertNotIn('return "invalid"', line)
-                self.assertNotIn('return "",', line)
+        tree = ast.parse(src)
+
+        def _verdict_domain_ok(node):
+            if isinstance(node, ast.Constant):
+                return node.value == "partial"
+            if isinstance(node, ast.Name):
+                return node.id in ("jadj", "aadj")
+            if isinstance(node, ast.BoolOp):
+                return all(_verdict_domain_ok(v) for v in node.values)
+            if isinstance(node, ast.IfExp):
+                return (_verdict_domain_ok(node.body)
+                        and _verdict_domain_ok(node.orelse))
+            return False
+
+        def _has_label(node):
+            if isinstance(node, ast.Constant) and "元数据漂移:" in str(node.value):
+                return True
+            if isinstance(node, ast.JoinedStr):
+                return any("元数据漂移:" in str(v.value or "")
+                           for v in node.values if isinstance(v, ast.Constant))
+            return False
+
+        hits = 0
+        for n in ast.walk(tree):
+            if not (isinstance(n, ast.Return) and isinstance(n.value, ast.Tuple)):
+                continue
+            if not any(_has_label(e) for e in n.value.elts):
+                continue
+            hits += 1
+            first = n.value.elts[0]
+            self.assertTrue(_verdict_domain_ok(first),
+                            f"标签 return 判定域越界: {ast.dump(first)[:80]}")
+        self.assertEqual(hits, 3, "三处标签 return（DOI 主/期刊作者/PMID）")
 
 
 class M2_OpenAlexRetry(unittest.TestCase):

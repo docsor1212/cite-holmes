@@ -19,9 +19,10 @@ _MCP_SPEC = importlib.util.spec_from_file_location(
 class TestErrorCodes(unittest.TestCase):
 
     def test_dou_not_found(self):
+        # v6.6.0 F63 更名：E_DOU→E_DOI（拼写错误根修，报告只发新码）
         r = {"verdict": "invalid", "doi": "10.9999/x",
              "note": "DOI 在 DOI.org 不存在（404）→ 疑似编造引用", "checks": {}}
-        self.assertIn("E_DOU_NOT_FOUND", vr.derive_error_codes(r))
+        self.assertIn("E_DOI_NOT_FOUND", vr.derive_error_codes(r))
 
     def test_title_mismatch(self):
         r = {"verdict": "invalid", "doi": "10.1/x",

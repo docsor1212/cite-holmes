@@ -62,13 +62,13 @@ v1.12：持久磁盘缓存（--cache 默认开，sqlite3 标准库存 ~/.cache/c
 168h——复跑不再出国、判定口径一致；--strict 强制绕过保 CI 诚实；--refresh-cache
 强制重验）；--proxy 显式代理；能力矩阵新增「不支持输入」行；包内私有工具清除。"""
 
-
 # v6.0.0 模块化分层壳：按本文件所在目录加载各自的 ch_* 实例——
 # trunk 与 mcp 副本互不共享模块对象（防双壳 _bind 互踩）；
 # 一切跨层符号经 _ROOT（=本壳命名空间）解析，测试 patch vr.X 直接生效。
 import os as _os, sys as _sys, importlib.util as _ilu
 
 import sys
+
 
 def main_with_args(argv: list) -> int:
     """程序化调用入口（测试/其他脚本用）。argv 不含脚本名。"""
@@ -81,10 +81,10 @@ def main_with_args(argv: list) -> int:
 
 
 _HERE = _os.path.dirname(_os.path.abspath(__file__))
-_PREFIX = 'mcp_' if _os.path.basename(_HERE) == 'mcp' else ''
-_LAYERS = ['ch_text', 'ch_netio', 'ch_registry', 'ch_semantic', 'ch_verify', 'ch_reports', 'ch_cli']
+_PREFIX = "mcp_" if _os.path.basename(_HERE) == "mcp" else ""
+_LAYERS = ["ch_text", "ch_netio", "ch_registry", "ch_semantic", "ch_verify", "ch_reports", "ch_cli"]
 for _name in _LAYERS:
-    _spec = _ilu.spec_from_file_location(_PREFIX + _name, _os.path.join(_HERE, _name + '.py'))
+    _spec = _ilu.spec_from_file_location(_PREFIX + _name, _os.path.join(_HERE, _name + ".py"))
     _mod = _ilu.module_from_spec(_spec)
     _sys.modules[_spec.name] = _mod
     _spec.loader.exec_module(_mod)
@@ -92,7 +92,7 @@ for _name in _LAYERS:
     globals()[_name] = _mod
 for _name in _LAYERS:
     for _k, _v in list(vars(globals()[_name]).items()):
-        if not _k.startswith('__'):
+        if not _k.startswith("__"):
             globals()[_k] = _v
 
 
@@ -103,7 +103,7 @@ def main():
 
 
 # __all__ 真末尾重算：import * 消费者拿到全部公开+单下划线名
-_NAMES = [n for n in dir() if not n.startswith('__')]
+_NAMES = [n for n in dir() if not n.startswith("__")]
 __all__ = _NAMES
 del _NAMES
 

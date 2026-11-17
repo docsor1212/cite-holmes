@@ -63,9 +63,12 @@ class TestGrillReport(unittest.TestCase):
             mu.assert_not_called()
 
     def test_cli_wiring(self):
+        # v6.6.0 F64：形状锁改两要素宽松断言（--grill 与 metavar 同函数在位；
+        # 格式化器重排 add_argument 换行不再破锁）
         from _mocks import engine_full_text
         src = engine_full_text()
-        self.assertIn('ap.add_argument("--grill", metavar="REPORT_JSON"', src)
+        self.assertIn('"--grill"', src)
+        self.assertIn('metavar="REPORT_JSON"', src)
         self.assertIn("_ROOT.render_grill_md(items, sc)", src)
 
 
@@ -127,8 +130,8 @@ class TestSkillSlimDown(unittest.TestCase):
         self.assertEqual(seg.count("return 2"), 3)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "6.5.0")
-        self.assertIn("version: 6.5.0",
+        self.assertEqual(vr.VERSION, "6.6.0")
+        self.assertIn("version: 6.6.0",
                       open(os.path.join(SK, "SKILL.md"), encoding="utf-8").read())
 
 

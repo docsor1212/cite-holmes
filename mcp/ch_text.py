@@ -20,8 +20,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-
-
 _ROOT = None  # 由 verify_refs 壳注入
 
 
@@ -30,7 +28,8 @@ def _bind(root):
     _ROOT = root
 
 
-VERSION = "6.5.0"
+VERSION = "6.6.0"
+
 
 # ---------------- 可选配置（v1.9，main() 按命令行/环境覆写） ----------------
 # OpenAlex 2026-02 起生产调用需 API key（每日免费额度）；Semantic Scholar 免钥
@@ -54,6 +53,7 @@ def bib_safe(value: str) -> str:
     """BibTeX 字段值加固：剥除花括号与换行/控制字符，防 @entry 逃逸。"""
     v = str(value if value is not None else "")
     return v.replace("{", "").replace("}", "").replace("\r", " ").replace("\n", " ")
+
 
 # ---------------- CiteScore 置信度评分（v1.3.0） ----------------
 # 五态加权：verified +10 / partial +4 / unreachable 0 / unverified -2 / invalid -8
@@ -105,51 +105,128 @@ def _author_consistent(claimed: list, csl_authors) -> bool:
 
 
 TIER_RULES = [
-    ("official", [
-        r"\.gov(\.[a-z]{2})?$", r"\.edu(\.[a-z]{2})?$", r"\.gov\.cn$", r"\.edu\.cn$",
-        r"^docs\.", r"^developer\.", r"^documentation\.", r"^support\.",
-        r"^www\.anthropic\.com$", r"^openai\.com$", r"^www\.nature\.com$",
-        r"^www\.nejm\.org$", r"^www\.who\.int$", r"^www\.fda\.gov$",
-        r"^www\.ema\.europa\.eu$", r"^arxiv\.org$", r"^export\.arxiv\.org$",
-        r"^www\.thelancet\.com$",
-        r"^jamanetwork\.com$", r"^pubmed\.ncbi\.nlm\.nih\.gov$", r"^doi\.org$",
-        r"^www\.sciencedirect\.com$", r"^link\.springer\.com$", r"^ieeexplore\.ieee\.org$",
-        r"^www\.stats\.gov\.cn$", r"^www\.nhc\.gov\.cn$",
-    ]),
-    ("journal", [
-        r"^pubmed\.ncbi\.nlm\.nih\.gov$", r"^doi\.org$", r"^journals?\.",
-        r"^academic\.", r"^scholar\.", r"^kns\.", r"^oa\.cqvip\.com$", r"(^|\.)yiigle\.com$",
-        # v4.2.0 中文医学注册库（dogfood 实测：万方题录 URL 被误层为 blog）
-        r"(^|\.)wanfangdata\.com\.cn$", r"(^|\.)cnki\.(?:net|com\.cn)$",
-    ]),
-    ("preprint", [r"^arxiv\.org$", r"^biorxiv\.org$", r"^medrxiv\.org$", r"^ssrn\.com$", r"^chemrxiv\.org$"]),
-    ("media", [
-        r"^www\.reuters\.com$", r"^apnews\.com$", r"^www\.bbc\.", r"^www\.nytimes\.com$",
-        r"^www\.bloomberg\.com$", r"^www\.ft\.com$", r"^www\.economist\.com$",
-        r"^news\.yahoo\.com$", r"^www\.thepaper\.cn$", r"^www\.caixin\.com$",
-        r"^www\.jiemian\.com$", r"^36kr\.com$", r"^www\.infoq\.cn$", r"^techcrunch\.com$",
-        r"^www\.theverge\.com$", r"^arstechnica\.com$", r"^www\.wired\.com$",
-    ]),
-    ("community", [
-        r"^github\.com$", r"^stackoverflow\.com$", r"^en\.wikipedia\.org$",
-        r"^zh\.wikipedia\.org$", r"^www\.zhihu\.com$", r"^zhuanlan\.zhihu\.com$",
-        r"^stackexchange\.com$", r"^www\.reddit\.com$", r"^news\.ycombinator\.com$",
-        r"^www\.v2ex\.com$", r"^segmentfault\.com$", r"^juejin\.cn$",
-    ]),
-    ("social", [
-        r"(^|\.)x\.com$", r"(^|\.)twitter\.com$", r"(^|\.)weibo\.com$", r"(^|\.)t\.me$",
-        r"(^|\.)facebook\.com$", r"(^|\.)youtube\.com$", r"(^|\.)bilibili\.com$",
-        r"(^|\.)douyin\.com$", r"(^|\.)xiaohongshu\.com$", r"(^|\.)medium\.com$",
-    ]),
+    (
+        "official",
+        [
+            r"\.gov(\.[a-z]{2})?$",
+            r"\.edu(\.[a-z]{2})?$",
+            r"\.gov\.cn$",
+            r"\.edu\.cn$",
+            r"^docs\.",
+            r"^developer\.",
+            r"^documentation\.",
+            r"^support\.",
+            r"^www\.anthropic\.com$",
+            r"^openai\.com$",
+            r"^www\.nature\.com$",
+            r"^www\.nejm\.org$",
+            r"^www\.who\.int$",
+            r"^www\.fda\.gov$",
+            r"^www\.ema\.europa\.eu$",
+            r"^arxiv\.org$",
+            r"^export\.arxiv\.org$",
+            r"^www\.thelancet\.com$",
+            r"^jamanetwork\.com$",
+            r"^pubmed\.ncbi\.nlm\.nih\.gov$",
+            r"^doi\.org$",
+            r"^www\.sciencedirect\.com$",
+            r"^link\.springer\.com$",
+            r"^ieeexplore\.ieee\.org$",
+            r"^www\.stats\.gov\.cn$",
+            r"^www\.nhc\.gov\.cn$",
+        ],
+    ),
+    (
+        "journal",
+        [
+            r"^pubmed\.ncbi\.nlm\.nih\.gov$",
+            r"^doi\.org$",
+            r"^journals?\.",
+            r"^academic\.",
+            r"^scholar\.",
+            r"^kns\.",
+            r"^oa\.cqvip\.com$",
+            r"(^|\.)yiigle\.com$",
+            # v4.2.0 中文医学注册库（dogfood 实测：万方题录 URL 被误层为 blog）
+            r"(^|\.)wanfangdata\.com\.cn$",
+            r"(^|\.)cnki\.(?:net|com\.cn)$",
+        ],
+    ),
+    (
+        "preprint",
+        [r"^arxiv\.org$", r"^biorxiv\.org$", r"^medrxiv\.org$", r"^ssrn\.com$", r"^chemrxiv\.org$"],
+    ),
+    (
+        "media",
+        [
+            r"^www\.reuters\.com$",
+            r"^apnews\.com$",
+            r"^www\.bbc\.",
+            r"^www\.nytimes\.com$",
+            r"^www\.bloomberg\.com$",
+            r"^www\.ft\.com$",
+            r"^www\.economist\.com$",
+            r"^news\.yahoo\.com$",
+            r"^www\.thepaper\.cn$",
+            r"^www\.caixin\.com$",
+            r"^www\.jiemian\.com$",
+            r"^36kr\.com$",
+            r"^www\.infoq\.cn$",
+            r"^techcrunch\.com$",
+            r"^www\.theverge\.com$",
+            r"^arstechnica\.com$",
+            r"^www\.wired\.com$",
+        ],
+    ),
+    (
+        "community",
+        [
+            r"^github\.com$",
+            r"^stackoverflow\.com$",
+            r"^en\.wikipedia\.org$",
+            r"^zh\.wikipedia\.org$",
+            r"^www\.zhihu\.com$",
+            r"^zhuanlan\.zhihu\.com$",
+            r"^stackexchange\.com$",
+            r"^www\.reddit\.com$",
+            r"^news\.ycombinator\.com$",
+            r"^www\.v2ex\.com$",
+            r"^segmentfault\.com$",
+            r"^juejin\.cn$",
+        ],
+    ),
+    (
+        "social",
+        [
+            r"(^|\.)x\.com$",
+            r"(^|\.)twitter\.com$",
+            r"(^|\.)weibo\.com$",
+            r"(^|\.)t\.me$",
+            r"(^|\.)facebook\.com$",
+            r"(^|\.)youtube\.com$",
+            r"(^|\.)bilibili\.com$",
+            r"(^|\.)douyin\.com$",
+            r"(^|\.)xiaohongshu\.com$",
+            r"(^|\.)medium\.com$",
+        ],
+    ),
 ]
 TRUSTED_TIERS = {"official", "journal", "preprint", "media"}
 
 # ---------------- 医学信源预设（--profile medical 时并入 journal 层） ----------------
 MEDICAL_JOURNAL_PATTERNS = [
-    r"\.cochranelibrary\.com$", r"^bestpractice\.bmj\.com$", r"^www\.bmj\.com$",
-    r"^www\.embase\.com$", r"^clinicaltrials\.gov$", r"^www\.chinacdc\.cn$",
-    r"^www\.cdc\.gov$", r"^www\.nmpa\.gov\.cn$", r"^www\.nice\.org\.uk$",
-    r"\.wanfangdata\.com\.cn$", r"^guide\.medlive\.cn$", r"^rs\.yiigle\.com$",
+    r"\.cochranelibrary\.com$",
+    r"^bestpractice\.bmj\.com$",
+    r"^www\.bmj\.com$",
+    r"^www\.embase\.com$",
+    r"^clinicaltrials\.gov$",
+    r"^www\.chinacdc\.cn$",
+    r"^www\.cdc\.gov$",
+    r"^www\.nmpa\.gov\.cn$",
+    r"^www\.nice\.org\.uk$",
+    r"\.wanfangdata\.com\.cn$",
+    r"^guide\.medlive\.cn$",
+    r"^rs\.yiigle\.com$",
     r"^(www\.)?chictr\.org\.cn$",
 ]
 
@@ -161,7 +238,9 @@ ARXIV_NEW_RE = re.compile(r"^\d{2}(?:0[1-9]|1[0-2])\.\d{4,5}(v\d+)?$", re.IGNORE
 ARXIV_OLD_RE = re.compile(r"^[a-z\-]+(?:\.[A-Z]{2})?/\d{7}(v\d+)?$", re.IGNORECASE)
 ARXIV_URL_RE = re.compile(
     r"^https?://(?:www\.|export\.)?arxiv\.org/(?:abs|pdf|format)/"
-    r"([a-z\-]+(?:\.[A-Z]{2})?/\d{7}|\d{2}(?:0[1-9]|1[0-2])\.\d{4,5})(v\d+)?", re.IGNORECASE)
+    r"([a-z\-]+(?:\.[A-Z]{2})?/\d{7}|\d{2}(?:0[1-9]|1[0-2])\.\d{4,5})(v\d+)?",
+    re.IGNORECASE,
+)
 REQUIRED_FIELDS = ("title", "url", "source", "year")
 
 
@@ -196,8 +275,7 @@ def classify_tier(url: str, medical: bool = False) -> str:
 
 def normalize_url(url: str) -> str:
     p = urlparse(url.strip())
-    return urlunparse((p.scheme.lower(), (p.netloc or "").lower(), p.path.rstrip("/"),
-                       "", "", ""))
+    return urlunparse((p.scheme.lower(), (p.netloc or "").lower(), p.path.rstrip("/"), "", "", ""))
 
 
 PUBMED_URL_RE = re.compile(r"^https?://pubmed\.ncbi\.nlm\.nih\.gov/(\d+)/?$")
@@ -210,9 +288,9 @@ def _cjk_norm(s: str) -> str:
     out = []
     for ch in str(s or "").lower():
         o = ord(ch)
-        if 0xFF01 <= o <= 0xFF5E:      # 全角 ASCII 区 → 半角
+        if 0xFF01 <= o <= 0xFF5E:  # 全角 ASCII 区 → 半角
             ch = chr(o - 0xFEE0)
-        elif ch == "\u3000":           # 全角空格
+        elif ch == "\u3000":  # 全角空格
             continue
         if ch.isalnum() or "\u4e00" <= ch <= "\u9fff":
             out.append(ch)
@@ -226,6 +304,7 @@ def _script_family(s: str) -> str:
     不可信，这正是守卫要扩到「中英之外」的依据：俄文/希腊文/日文声称题名
     对英文登记名，旧守卫（只认 CJK）会漏判导致 sim 低被误判 invalid。"""
     from collections import Counter
+
     cnt = Counter()
     for ch in str(s or ""):
         o = ord(ch)
@@ -374,15 +453,21 @@ def _journal_consistent(claimed: str, registry: str) -> bool:
     return bool(ok and hit >= max(1, len([w for w in short if w not in stop])))
 
 
-FIELD_ZH = {"title": "标题(title)", "url": "链接(url)", "source": "来源(source)", "year": "年份(year)"}
+FIELD_ZH = {
+    "title": "标题(title)",
+    "url": "链接(url)",
+    "source": "来源(source)",
+    "year": "年份(year)",
+}
 
 
 def missing_fields(ref: dict) -> list:
     miss = [f for f in REQUIRED_FIELDS if not ref.get(f)]
     if "url" in miss and (
-            (ref.get("doi") and DOI_RE.match(str(ref["doi"]).strip())) or
-            (ref.get("pmid") and PMID_RE.match(str(ref["pmid"]).strip())) or
-            extract_arxiv_id(ref)):
+        (ref.get("doi") and DOI_RE.match(str(ref["doi"]).strip()))
+        or (ref.get("pmid") and PMID_RE.match(str(ref["pmid"]).strip()))
+        or extract_arxiv_id(ref)
+    ):
         miss.remove("url")
     return [FIELD_ZH.get(f, f) for f in miss]
 
@@ -406,6 +491,7 @@ def ref_to_url(ref: dict) -> str:
 
 # ---------------- BibTeX 导入（v1.9，对标 Zotero/EndNote 工作流） ----------------
 
+
 def _bib_unbrace(value: str) -> str:
     """BibTeX 字段值清理：还原常见 TeX 转义（\\& → & 等）、去花括号与转义残留、
     压缩空白。刻意不做重音展开（Schr\\"oder 类）——标题比对走模糊相似度，无需精确。"""
@@ -417,6 +503,7 @@ def _bib_unbrace(value: str) -> str:
 def _bib_entry_to_ref(etype: str, f: dict) -> dict:
     """BibTeX 字段 → 引用 schema。source 依次取 journal/booktitle/journaltitle/
     publisher；howpublished 含 \\url 宏时只取链接不进 source（避免垃圾来源名）。"""
+
     def g(k):
         return _bib_unbrace(f.get(k, ""))
 
@@ -427,17 +514,21 @@ def _bib_entry_to_ref(etype: str, f: dict) -> dict:
             if m:
                 url = m.group(1).strip()
                 break
-    src = (g("journal") or g("booktitle") or g("journaltitle") or g("publisher"))
+    src = g("journal") or g("booktitle") or g("journaltitle") or g("publisher")
     if not src:
         hp = str(f.get("howpublished") or "")
         if hp and "\\url" not in hp:
             src = _bib_unbrace(hp)
-    ref = {"title": g("title"),
-           # BibTeX 多作者分隔符 " and " 归一为逗号——姓氏提取按逗号分段
-           "authors": g("author").replace(" and ", ", "), "source": src,
-           "year": re.sub(r"[^0-9]", "", g("year"))[:4] or None,
-           "doi": g("doi"), "url": url,
-           "pmid": re.sub(r"[^0-9]", "", g("pmid"))}
+    ref = {
+        "title": g("title"),
+        # BibTeX 多作者分隔符 " and " 归一为逗号——姓氏提取按逗号分段
+        "authors": g("author").replace(" and ", ", "),
+        "source": src,
+        "year": re.sub(r"[^0-9]", "", g("year"))[:4] or None,
+        "doi": g("doi"),
+        "url": url,
+        "pmid": re.sub(r"[^0-9]", "", g("pmid")),
+    }
     eprint = g("eprint")
     if eprint and g("archiveprefix").lower() in ("arxiv", ""):
         ref["arxiv"] = eprint
@@ -487,12 +578,12 @@ def parse_bibtex(text: str) -> list:
                     elif text[k] == "}":
                         d -= 1
                     k += 1
-                raw = text[i + 1:k - 1]
+                raw = text[i + 1 : k - 1]
                 i = k
             elif i < n and text[i] == '"':  # 引号值（内部可含花括号）
                 k = text.find('"', i + 1)
                 k = n if k < 0 else k
-                raw = text[i + 1:k]
+                raw = text[i + 1 : k]
                 i = k + 1
             else:  # 裸值（数字/缩写）
                 k = i
@@ -522,7 +613,9 @@ def load_refs_file(path: str) -> list:
         # v4.0.0 医学文档直接核验：markdown 参考文献节 Vancouver 条目提取
         refs = parse_markdown_refs(text)
         if not refs:
-            raise ValueError("markdown 中未解析到编号参考文献条目（应有 '## 参考文献' 节与 '1. ' 编号行）")
+            raise ValueError(
+                "markdown 中未解析到编号参考文献条目（应有 '## 参考文献' 节与 '1. ' 编号行）"
+            )
         return refs
     try:
         return json.loads(text)
@@ -535,8 +628,7 @@ def load_refs_file(path: str) -> list:
         raise
 
 
-_REF_SECTION_RE = re.compile(
-    r"(?:^|\n)#{0,6}\s*(?:\d+[.、]?\s*)?(?:参考文献|References)[^\n]*\n")
+_REF_SECTION_RE = re.compile(r"(?:^|\n)#{0,6}\s*(?:\d+[.、]?\s*)?(?:参考文献|References)[^\n]*\n")
 
 
 def parse_markdown_refs(text: str) -> list:
@@ -554,7 +646,7 @@ def parse_markdown_refs(text: str) -> list:
     - `[J]`/`[EB/OL]` 类型标记剥除；期刊段内「年, 卷(期): 页」残尾清理。"""
     refs = []
     m = _REF_SECTION_RE.search(text)
-    body = text[m.end():] if m else text
+    body = text[m.end() :] if m else text
     for raw in body.splitlines():
         line = re.sub(r"\*\*|\*|__|_", "", raw.strip())
         mm = re.match(r"^(?:\[(\d{1,3})\][.、]?|(\d{1,3})[.、)])\s+(.{10,})$", line)
@@ -566,8 +658,7 @@ def parse_markdown_refs(text: str) -> list:
         # 缩写句点不劈（v4.6.0 dogfood 实锤：'U.S. Food and Drug Administration'
         # 被切分器劈开，机构名当了题名）——「单大写字母+.」紧跟的句点不切分；
         # 普通首字母缩略后的题名界（如 N H. Title）不受影响
-        segs = [s.strip(" *") for s in re.split(r"(?<![A-Z]\.[A-Z])\.\s+", rest)
-                if s.strip(" *")]
+        segs = [s.strip(" *") for s in re.split(r"(?<![A-Z]\.[A-Z])\.\s+", rest) if s.strip(" *")]
         if len(segs) < 2:
             continue
         year = None
@@ -583,18 +674,22 @@ def parse_markdown_refs(text: str) -> list:
             # 自愈条件：首段含 ". "（有被守卫吞掉的切分点）+ 基线切分的尾段仍以
             # 类型码结尾（=真题名）+ 头部含点式缩写模式（J.J——区别于普通题名）
             # + 无年份逗号（非期刊段）。三者齐备才拆回，普通题名零影响。
-            parts0 = [p.strip(" *") for p in re.split(r"\.\s+", segs[0])
-                      if p.strip(" *")]
+            parts0 = [p.strip(" *") for p in re.split(r"\.\s+", segs[0]) if p.strip(" *")]
             # 审计 P1 形态门：作者头（首段）须呈「姓氏 点式缩写」（HANSEN J.J /
             # SMITH A.B, JONES C.D）——题名自身含 U.S./Q.T.（Cost-effectiveness
             # of U.S. pharmacogenomics...）时形态不符，不拆（基线行为保持）。
             # 题名重建取 parts0[1:] 全部（题名内部的点式缩写也被守卫切开过）
             _authorish = parts0[0].count(" ") <= 4 and all(
-                re.match(r"^[A-Za-z'\u2019\-]+(?:,? [A-Z](?:\.[A-Z])+\.?)?$",
-                         p.strip()) for p in parts0[0].split(",") if p.strip())
-            if (len(parts0) >= 2 and _authorish
-                    and re.search(r"\[[A-Z]{1,2}(?:/OL)?\]\s*$", parts0[-1])
-                    and not re.search(r"[,，]\s*(19|20)\d{2}", segs[0])):
+                re.match(r"^[A-Za-z'\u2019\-]+(?:,? [A-Z](?:\.[A-Z])+\.?)?$", p.strip())
+                for p in parts0[0].split(",")
+                if p.strip()
+            )
+            if (
+                len(parts0) >= 2
+                and _authorish
+                and re.search(r"\[[A-Z]{1,2}(?:/OL)?\]\s*$", parts0[-1])
+                and not re.search(r"[,，]\s*(19|20)\d{2}", segs[0])
+            ):
                 # 该分支的内部切分点全是被守卫阻断的链式缩写（字母.字母.），
                 # 切分吃掉的句点属题名本体——". " 重组还原（Q.T. interval 形态）
                 segs = [parts0[0], ". ".join(parts0[1:])] + segs[1:]
@@ -637,7 +732,9 @@ def parse_markdown_refs(text: str) -> list:
         #           `2020, 8: 218`（无期）/ `2020, 35(12)`（无页）
         lm = re.search(
             r"(?:19|20)\d{2}\s*[,，]\s*(\d{1,4})\s*(?:\((\d{1,4})\))?"
-            r"(?:\s*[:：]\s*([A-Za-z]{0,2}\d+[A-Za-z0-9]*))?", rest)
+            r"(?:\s*[:：]\s*([A-Za-z]{0,2}\d+[A-Za-z0-9]*))?",
+            rest,
+        )
         if lm:
             entry["volume"] = lm.group(1)
             entry["issue"] = lm.group(2) or ""
@@ -651,8 +748,9 @@ def clean_title(line: str) -> str:
     DOI/arXiv 元数据匹配的标题相似度(实测 demo 端 AlphaFold 整行 0.66→清洗后 0.9+)。"""
     t = re.sub(r"^(?:\[\d+\]|\d+[.)])\s*", "", line.strip())
     t = re.split(r"\s+(?:doi|pmid|arxiv)\s*[:：]", t, flags=re.I)[0]
-    t = re.sub(r"(?:,|\.\s)\s*(?:et al\.?|and\s+[A-Z][a-z]+)[^0-9]{0,40}"
-               r"(?:19|20)\d{2}", "", t, count=1)
+    t = re.sub(
+        r"(?:,|\.\s)\s*(?:et al\.?|and\s+[A-Z][a-z]+)[^0-9]{0,40}" r"(?:19|20)\d{2}", "", t, count=1
+    )
     t = re.sub(r"[.。]\s*(?:19|20)\d{2}.*$", "", t)
     return t.strip()[:200] or line.strip()[:200]
 
@@ -663,7 +761,7 @@ def chunk_text(text: str, size: int = 900, overlap: int = 120) -> list:
         return []
     chunks, i = [], 0
     while i < len(text):
-        chunks.append(text[i:i + size])
+        chunks.append(text[i : i + size])
         i += size - overlap
     return chunks
 
@@ -671,8 +769,10 @@ def chunk_text(text: str, size: int = 900, overlap: int = 120) -> list:
 def _tfidf_top(query: str, chunks: list, k: int = 2) -> list:
     """TF-IDF 保底检索（无 ollama 时）。纯标准库实现,选 top-k 索引。"""
     import math
+
     def tokens(t):
         return re.findall(r"[a-zA-Z0-9\u4e00-\u9fff]+", t.lower())
+
     q = tokens(query)
     if not q or not chunks:
         return list(range(min(k, len(chunks))))
@@ -686,8 +786,7 @@ def _tfidf_top(query: str, chunks: list, k: int = 2) -> list:
         tf = {}
         for w in toks:
             tf[w] = tf.get(w, 0) + 1
-        sc = sum(tf.get(w, 0) * math.log((len(chunks) + 1) / (df.get(w, 0) + 1))
-                 for w in q)
+        sc = sum(tf.get(w, 0) * math.log((len(chunks) + 1) / (df.get(w, 0) + 1)) for w in q)
         scores.append(sc)
     return sorted(range(len(chunks)), key=lambda i: -scores[i])[:k]
 
@@ -715,7 +814,9 @@ def mark_duplicates(results: list) -> None:
         hit = next(((k, seen[v]) for k, v in keys if v in seen), None)
         if hit:
             kind, first = hit
-            r["note"] = (r["note"] + "；" if r["note"] else "") + f"与 #{first} 重复（同{kind_zh[kind]}）"
+            r["note"] = (
+                r["note"] + "；" if r["note"] else ""
+            ) + f"与 #{first} 重复（同{kind_zh[kind]}）"
             if r["verdict"] == "verified":
                 r["verdict"] = "partial"
         else:
@@ -735,6 +836,7 @@ def _clone_pairs_scan(results: list) -> list:
     豁免预筛（R2 无相似度下限，完全不同的标题也要走 R2 判定），预筛
     砍掉的 R2 粗端由 doi_metadata_match 的标题比对兜住。"""
     import difflib as _d
+
     pairs = []
     items = []
     for r in results:
@@ -758,19 +860,28 @@ def _clone_pairs_scan(results: list) -> list:
                 continue
             sim = sm.ratio()
             if sim >= 0.92 and da and db and da != db:
-                pairs.append({"a": ra["index"], "b": rb["index"], "kind": "clone_doi",
-                              "sim": round(sim, 2)})
+                pairs.append(
+                    {"a": ra["index"], "b": rb["index"], "kind": "clone_doi", "sim": round(sim, 2)}
+                )
             elif da and da == db and sim < 0.92:
-                pairs.append({"a": ra["index"], "b": rb["index"], "kind": "clone_title",
-                              "sim": round(sim, 2)})
+                pairs.append(
+                    {
+                        "a": ra["index"],
+                        "b": rb["index"],
+                        "kind": "clone_title",
+                        "sim": round(sim, 2),
+                    }
+                )
     return pairs
 
 
 def detect_clone_pairs(results: list) -> int:
     """v3.10 克隆引用搭档检测（主流程调用一次）：扫描克隆对并为双方追加
     警示注记。判定不改——注记明确「以元数据核验为准」。返回克隆对数。"""
-    zh = {"clone_doi": "同题不同 DOI（克隆引用：至少一个标识为编造或错引）",
-          "clone_title": "同 DOI 不同标题（拼接变体警示：判定已各自独立核验）"}
+    zh = {
+        "clone_doi": "同题不同 DOI（克隆引用：至少一个标识为编造或错引）",
+        "clone_title": "同 DOI 不同标题（拼接变体警示：判定已各自独立核验）",
+    }
     seen_pairs = set()
     cnt = 0
     for p in _clone_pairs_scan(results):
@@ -795,9 +906,13 @@ def collect_clone_pairs(results: list) -> list:
 
 # ═══ v3.11.0 清单画像与版本提示：从单条伪造到整批伪装 ═══
 
-VERDICT_ZH = {"verified": "✅ verified", "partial": "🟡 partial", "unreachable": "⚠️ unreachable",
-              "invalid": "❌ invalid", "unverified": "⏸ unverified"}
-
+VERDICT_ZH = {
+    "verified": "✅ verified",
+    "partial": "🟡 partial",
+    "unreachable": "⚠️ unreachable",
+    "invalid": "❌ invalid",
+    "unverified": "⏸ unverified",
+}
 
 
 # ═══ v3.7.0 文档级引用核查(--check-document):从清单核验到上下文核验 ═══
@@ -805,13 +920,16 @@ VERDICT_ZH = {"verified": "✅ verified", "partial": "🟡 partial", "unreachabl
 _CIT_NUM = re.compile(r"\[(\d{1,3}(?:\s*[,,]\s*\d{1,3})*)\]")
 _CIT_RANGE = re.compile(r"\[(\d{1,3})\s*-\s*(\d{1,3})\]")
 _CIT_AY = re.compile(
-    r"\(([A-Z][A-Za-z\-]+)(?:\s+et\s+al\.)?[,;]\s*(\d{4})\)"      # (Smith, 2023)/(Smith et al., 2023)
-    r"|([A-Z][A-Za-z\-]+\s+et\s+al\.)\s*\((\d{4})\)")               # Smith et al. (2023) 叙述式
+    r"\(([A-Z][A-Za-z\-]+)(?:\s+et\s+al\.)?[,;]\s*(\d{4})\)"  # (Smith, 2023)/(Smith et al., 2023)
+    r"|([A-Z][A-Za-z\-]+\s+et\s+al\.)\s*\((\d{4})\)"
+)  # Smith et al. (2023) 叙述式
 _CIT_DOI = re.compile(r"https?://(?:dx\.)?doi\.org/(10\.[^\s)\]}]+)", re.I)
 _SENT_SPLIT = re.compile(r"(?<=[。！？])\s*|(?<=[.!?])\s+(?=[A-Z0-9\u4e00-\u9fff])")
-_STOP = set("a an the of in on at to for and or is are was were be been with as by from "
-            "that this these those it its we our their his her study paper research "
-            "的 与 和 在 是 了 等 对 将 被 从 而 及 其 该 项 项".split())
+_STOP = set(
+    "a an the of in on at to for and or is are was were be been with as by from "
+    "that this these those it its we our their his her study paper research "
+    "的 与 和 在 是 了 等 对 将 被 从 而 及 其 该 项 项".split()
+)
 
 
 def _sentences(text: str):
@@ -838,15 +956,16 @@ def extract_citations(text: str) -> list:
             if m.group(1):
                 found[m.group(0)] = ("author-year", m.group(1), m.group(2))
             else:
-                found[m.group(0)] = ("author-year",
-                                     m.group(3).replace(" et al.", ""), m.group(4))
+                found[m.group(0)] = ("author-year", m.group(3).replace(" et al.", ""), m.group(4))
         for m in _CIT_DOI.finditer(sent):
             found[m.group(0)] = ("doi", m.group(1))
         for marker, idxs in found.items():
-            kind = ("numeric" if isinstance(idxs, list)
-                    else idxs[0] if isinstance(idxs, tuple) else "numeric")
-            out.append({"marker": marker, "kind": kind,
-                        "sentence": sent[:400], "index": idxs})
+            kind = (
+                "numeric"
+                if isinstance(idxs, list)
+                else idxs[0] if isinstance(idxs, tuple) else "numeric"
+            )
+            out.append({"marker": marker, "kind": kind, "sentence": sent[:400], "index": idxs})
     return out
 
 
@@ -859,9 +978,11 @@ def _norm_word(w: str) -> str:
 
 
 def _content_words(s: str) -> set:
-    return {_norm_word(w) for w in
-            re.findall(r"[a-z0-9\u4e00-\u9fff]{2,}", (s or "").lower())
-            if w not in _STOP}
+    return {
+        _norm_word(w)
+        for w in re.findall(r"[a-z0-9\u4e00-\u9fff]{2,}", (s or "").lower())
+        if w not in _STOP
+    }
 
 
 def anchor_rate(sentence: str, ref: dict) -> float:
@@ -874,9 +995,11 @@ def anchor_rate(sentence: str, ref: dict) -> float:
     sw = _content_words(sentence)
     hit = 0
     for t in tw:
-        if t in sw or any(t.startswith(s) or s.startswith(t)
-                          for s in sw if min(len(s), len(t)) >= 5) \
-           or any(s == t for s in sw):
+        if (
+            t in sw
+            or any(t.startswith(s) or s.startswith(t) for s in sw if min(len(s), len(t)) >= 5)
+            or any(s == t for s in sw)
+        ):
             hit += 1
     # v3.8.0:作者姓氏出现在引文句=强绑定证据(注册库权威名),计 1 词命中
     surnames = {a.split()[0].lower() for a in (csl.get("authors") or []) if a.split()}
@@ -893,23 +1016,37 @@ def bind_citation(cit: dict, results: list) -> dict:
         for n in idxs:
             r = next((x for x in results if x.get("index") == n), None)
             (bound if r else missing).append(r if r else n)
-        return {"marker": cit["marker"], "kind": "numeric",
-                "bound": bound, "unbound": missing}
+        return {"marker": cit["marker"], "kind": "numeric", "bound": bound, "unbound": missing}
     if idxs[0] == "doi":
-        r = next((x for x in results
-                  if (x.get("doi") or "").lower() == idxs[1].lower()), None)
-        return {"marker": cit["marker"], "kind": "doi",
-                "bound": [r] if r else [], "unbound": [] if r else [idxs[1]]}
+        r = next((x for x in results if (x.get("doi") or "").lower() == idxs[1].lower()), None)
+        return {
+            "marker": cit["marker"],
+            "kind": "doi",
+            "bound": [r] if r else [],
+            "unbound": [] if r else [idxs[1]],
+        }
     _, surname, year = idxs
-    cands = [x for x in results
-             if str(x.get("year") or "") == year
-             and surname.lower() in _content_words(
-                 json.dumps((x.get("checks", {}).get("doi_metadata", {})
-                             .get("csl", {}) or {}).get("authors", []),
-                            ensure_ascii=False).lower())
-             or surname.lower() in (x.get("title") or "").lower()]
-    return {"marker": cit["marker"], "kind": "author-year",
-            "bound": cands[:1], "unbound": [] if cands else [f"{surname} {year}"]}
+    cands = [
+        x
+        for x in results
+        if str(x.get("year") or "") == year
+        and surname.lower()
+        in _content_words(
+            json.dumps(
+                (x.get("checks", {}).get("doi_metadata", {}).get("csl", {}) or {}).get(
+                    "authors", []
+                ),
+                ensure_ascii=False,
+            ).lower()
+        )
+        or surname.lower() in (x.get("title") or "").lower()
+    ]
+    return {
+        "marker": cit["marker"],
+        "kind": "author-year",
+        "bound": cands[:1],
+        "unbound": [] if cands else [f"{surname} {year}"],
+    }
 
 
 _INTENTS_ZH = {"methodology": "方法学", "background": "背景", "result": "结果"}
@@ -921,6 +1058,5 @@ _CONTRAST_RE = re.compile(
     r"\bchallenge[sd]?\b|\bquestion(s|ed|ing)?\b|fail(s|ed|ing)? to|"
     r"unable to|inconsisten\w*|"
     r"(?<!不)但|然而|与此相反|相反|并未|未能|不一致|质疑|挑战(?!性)|反驳|矛盾|争议)",
-    re.I)
-
-
+    re.I,
+)

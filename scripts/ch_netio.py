@@ -20,8 +20,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-
-
 _ROOT = None  # 由 verify_refs 壳注入
 
 
@@ -87,10 +85,14 @@ def _cb_skip_note(url: str) -> str:
     with _CB_LOCK:
         degraded = _NET_STATE["degraded"] and h not in _NET_STATE["ok_hosts"]
     if degraded:
-        return ("全局网络降级：本批次已有多个外部主机连续传输失败（出海受限特征），"
-                "跳过本次外呼（建议配置代理/更换网络后重跑），本条仅按结构/其他信息判定")
-    return (f"网络断路器：{h} 本批次已连续 {_CB_THRESHOLD} 次传输失败，"
-            "跳过本次外呼（避免整批卡死），本条仅按结构/其他信息判定")
+        return (
+            "全局网络降级：本批次已有多个外部主机连续传输失败（出海受限特征），"
+            "跳过本次外呼（建议配置代理/更换网络后重跑），本条仅按结构/其他信息判定"
+        )
+    return (
+        f"网络断路器：{h} 本批次已连续 {_CB_THRESHOLD} 次传输失败，"
+        "跳过本次外呼（避免整批卡死），本条仅按结构/其他信息判定"
+    )
 
 
 def _cb_record(url: str, transport_fail: bool, degrade: bool = None) -> None:
@@ -119,7 +121,9 @@ def _cb_record(url: str, transport_fail: bool, degrade: bool = None) -> None:
             _NET_STATE["ok_hosts"].add(h)
             _NET_STATE["fail_hosts"].discard(h)
 
+
 # ---------------- 公共安全/转义帮手（v1.4 评审加固） ----------------
+
 
 def ssrf_blocked(url: str) -> bool:
     """SSRF 字面量防护：URL 主机部分写明回环/内网/链路本地/保留 IP 或 localhost
@@ -129,15 +133,41 @@ def ssrf_blocked(url: str) -> bool:
     host = (urlparse(url).hostname or "").lower().rstrip(".")
     if not host:
         return False
-    if host == "localhost" or host.endswith(".localhost") or \
-            host.endswith(".local") or host.endswith(".internal"):
+    if (
+        host == "localhost"
+        or host.endswith(".localhost")
+        or host.endswith(".local")
+        or host.endswith(".internal")
+    ):
         return True
     try:
         addr = ipaddress.ip_address(host)  # 仅当主机部分本身就是 IP 字面量
     except ValueError:
         return False
-    return (addr.is_private or addr.is_loopback or addr.is_link_local
-            or addr.is_reserved or addr.is_multicast)
+    return (
+        addr.is_private
+        or addr.is_loopback
+        or addr.is_link_local
+        or addr.is_reserved
+        or addr.is_multicast
+    )
+
+
+# v6.6.0 F62：SSRF 拒绝话术单一来源（raise 与调用方识别共用同一常量，
+# 消跨文件措辞耦合——审计 P2：此前靠子串匹配两处手工同步）
+_SSRF_REFUSAL_NOTE = "重定向目标命中内网/保留地址，已拒绝（SSRF 防护）"
+
+
+class GuardedRedirectHandler(urllib.request.HTTPRedirectHandler):
+    """v6.6.0 F62：重定向逐跳 SSRF 复核。此前 check_url 的自动跟随路径对
+    302 目标不做防护——公网 URL 经重定向跳内网/保留地址的绕过面封死
+    （_fetch_landing_html 手动逐跳路径 v4.8.0 起已有每跳双门，本类补齐
+    自动跟随路径）。命中即抛 URLError，由调用方按 SSRF 拒绝如实透出。"""
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        if ssrf_blocked(str(newurl)):
+            raise urllib.error.URLError(_SSRF_REFUSAL_NOTE)
+        return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
 _NCBI_LAST = [0.0]
@@ -154,8 +184,15 @@ def _ncbi_rate_wait():
         _NCBI_LAST[0] = time.time()
 
 
-_TLS_STALL_MARKERS = ("timed out", "timeout", "handshake", "ssl", "tls",
-                      "connection reset", "eof occurred")
+_TLS_STALL_MARKERS = (
+    "timed out",
+    "timeout",
+    "handshake",
+    "ssl",
+    "tls",
+    "connection reset",
+    "eof occurred",
+)
 _TLS12_CTX = [None]
 
 
@@ -166,6 +203,7 @@ def _tls12_context():
     误判 unreachable。仅在 _urlopen_retry 的 TLS 特征异常后降级一试。"""
     if _TLS12_CTX[0] is None:
         import ssl
+
         ctx = ssl.create_default_context()
         try:
             ctx.options |= ssl.OP_NO_TLSv1_3
@@ -203,26 +241,38 @@ def _urlopen_retry(req, timeout: float, attempts: int = 3, backoff: float = 1.5)
         try:
             if use_direct:
                 import os
+
                 # 陷阱（2026-11-13 单变量实验实证）：代理路径首轮会把代理地址
                 # 烘焙进 Request.host（如 127.0.0.1:7890）——复用被污染对象时
                 # 即使换了无代理 opener 仍连死代理。直连必须重建请求对象。
                 direct_req = urllib.request.Request(
-                    req.full_url, data=req.data,
+                    req.full_url,
+                    data=req.data,
                     headers=dict(req.header_items()),
-                    method=req.get_method())
+                    method=req.get_method(),
+                )
                 # 走 urlopen（而非自建 opener.open）保持与调用方/测试同一入口：
                 # ①测试对 urllib.request.urlopen 的统一 mock 在直连分支同样生效
                 #   （自建 opener.open 会绕过 mock 打真网——9 用例回归实证）；
                 # ②清代理 env + 装无代理默认 opener 实现"urlopen 但直连"。
                 # install_opener 全局副作用=本进程此后默认直连：代理栈已证实
                 # 故障的会话里这是期望行为（会话级自愈）。
-                _saved = {k: os.environ.pop(k) for k in
-                          ("http_proxy", "https_proxy", "HTTP_PROXY",
-                           "HTTPS_PROXY", "all_proxy", "ALL_PROXY")
-                          if k in os.environ}
+                _saved = {
+                    k: os.environ.pop(k)
+                    for k in (
+                        "http_proxy",
+                        "https_proxy",
+                        "HTTP_PROXY",
+                        "HTTPS_PROXY",
+                        "all_proxy",
+                        "ALL_PROXY",
+                    )
+                    if k in os.environ
+                }
                 try:
-                    urllib.request.install_opener(urllib.request.build_opener(
-                        urllib.request.ProxyHandler({})))
+                    urllib.request.install_opener(
+                        urllib.request.build_opener(urllib.request.ProxyHandler({}))
+                    )
                     return urllib.request.urlopen(direct_req, timeout=timeout)
                 finally:
                     os.environ.update(_saved)
@@ -240,19 +290,25 @@ def _urlopen_retry(req, timeout: float, attempts: int = 3, backoff: float = 1.5)
             # node undici 不受影响）——EB/OL 引用指向此类 CDN 站会被误判
             # unreachable。特征词命中即降级一试；mock 签名不含 context 时
             # TypeError 回退常规重试（密封兼容）。
-            if (not tls12_tried and str(getattr(req, "full_url", "")).startswith("https")
-                    and any(m in str(e).lower() for m in _TLS_STALL_MARKERS)):
+            if (
+                not tls12_tried
+                and str(getattr(req, "full_url", "")).startswith("https")
+                and any(m in str(e).lower() for m in _TLS_STALL_MARKERS)
+            ):
                 tls12_tried = True
                 try:
                     # 对抗审计观察（v6.4.0）：代理路径可能把代理地址烘焙进
                     # req.host（v6.3.1 注释已立档的陷阱）——降级轮与直连自愈
                     # 分支同刀：重建请求对象，防降级轮连死代理。
                     tls_req = urllib.request.Request(
-                        req.full_url, data=req.data,
+                        req.full_url,
+                        data=req.data,
                         headers=dict(req.header_items()),
-                        method=req.get_method())
-                    return urllib.request.urlopen(tls_req, timeout=timeout,
-                                                  context=_tls12_context())
+                        method=req.get_method(),
+                    )
+                    return urllib.request.urlopen(
+                        tls_req, timeout=timeout, context=_tls12_context()
+                    )
                 except TypeError:
                     pass  # 密封 mock 严格签名——回退常规退避路径
                 except Exception as e2:
@@ -327,8 +383,10 @@ _DC_CACHEABLE = {"verified", "partial", "invalid"}
 
 
 def _dc_key(ref: dict, profile: str) -> str:
-    basis = {k: ref.get(k) for k in ("doi", "url", "pmid", "arxiv", "title",
-                                     "year", "source", "authors", "tier")}
+    basis = {
+        k: ref.get(k)
+        for k in ("doi", "url", "pmid", "arxiv", "title", "year", "source", "authors", "tier")
+    }
     basis["_v"] = _ROOT.VERSION
     basis["_p"] = profile
     raw = json.dumps(basis, sort_keys=True, ensure_ascii=False)
@@ -336,6 +394,7 @@ def _dc_key(ref: dict, profile: str) -> str:
 
 
 # ---------------- L4 证据升级级联（v3.0.0,DeepSciVerify 两级联开源化） ----------------
+
 
 def _dc_path(args) -> str:
     return os.path.abspath(os.path.expanduser(args.cache_path))
@@ -347,11 +406,13 @@ def _dc_get(path: str, key: str, ttl_h: float):
         return None
     try:
         import sqlite3
+
         os.makedirs(os.path.dirname(path), exist_ok=True)
         conn = sqlite3.connect(path)
         try:
-            conn.execute("CREATE TABLE IF NOT EXISTS dc("
-                         "k TEXT PRIMARY KEY, ts REAL, payload TEXT)")
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS dc(" "k TEXT PRIMARY KEY, ts REAL, payload TEXT)"
+            )
             row = conn.execute("SELECT ts, payload FROM dc WHERE k=?", (key,)).fetchone()
         finally:
             conn.close()
@@ -377,18 +438,20 @@ def _dc_put(path: str, key: str, result: dict) -> None:
         return
     try:
         import sqlite3
+
         os.makedirs(os.path.dirname(path), exist_ok=True)
         slim = {k: v for k, v in result.items() if k != "index"}
         conn = sqlite3.connect(path)
         try:
-            conn.execute("CREATE TABLE IF NOT EXISTS dc("
-                         "k TEXT PRIMARY KEY, ts REAL, payload TEXT)")
-            conn.execute("INSERT OR REPLACE INTO dc(k, ts, payload) VALUES (?,?,?)",
-                         (key, time.time(), json.dumps(slim, ensure_ascii=False)))
+            conn.execute(
+                "CREATE TABLE IF NOT EXISTS dc(" "k TEXT PRIMARY KEY, ts REAL, payload TEXT)"
+            )
+            conn.execute(
+                "INSERT OR REPLACE INTO dc(k, ts, payload) VALUES (?,?,?)",
+                (key, time.time(), json.dumps(slim, ensure_ascii=False)),
+            )
             conn.commit()
         finally:
             conn.close()
     except Exception:
         pass  # 缓存写失败绝不影响验证本身
-
-

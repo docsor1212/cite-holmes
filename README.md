@@ -237,6 +237,8 @@ or gate your CI on it (`--strict`).
 
 ## What's new
 
+**v6.6.0** — license labeling unified (MIT across LICENSE/SKILL/README); per-hop redirect guard for citation reachability probes (public links redirecting into private/reserved ranges refused; security declaration now states its boundaries honestly); top-level error codes consolidated into a single-source registry (E_DOU_NOT_FOUND typo corrected to E_DOI_NOT_FOUND with legacy-code compatibility); engine sources reflowed to readable line widths under an AST-equivalence gate.
+
 **v6.5.0** — in-package sealed test subset (manifest-driven; `selfcheck --tests`) so installers can re-verify verdict semantics and engineering locks; independent holdout set expanded to 36 refs (21 live-verified multi-domain clean + 15 planted forms, 7 new shapes) via a two-phase build pipeline with per-entry human-review freeze gate; `tools/run_tests.sh --held-out` live gate (capture=100% / zero false-kill / fidelity=100%); netcheck adds cross-registry title-consistency probe (Crossref/OpenAlex/PubMed).
 
 **v6.4.0** — TLS-fingerprint downgrade retry in the transport layer (fixes CDN-site unreachable misjudgements; request object rebuilt on the downgrade round) and metadata-fidelity grading annotations within partial (minor/major drift, verdict semantics untouched) with a live-calibrated corrosion holdout set; OpenAlex 429 backoff retry; `--require-version` strict tier (default off); `tools/run_tests.sh` suite entry; netcheck CDN probes.
@@ -374,7 +376,7 @@ or gate your CI on it (`--strict`).
   command-first (run → verdicts → mechanical/semantic layers → task→flag
   table). 355 tests green.
 - **v3.9.0** — structured error codes + escalation routing: every result now
-  carries machine-readable `error_codes` (E_DOU_NOT_FOUND / E_TITLE_MISMATCH /
+  carries machine-readable `error_codes` (E_DOI_NOT_FOUND / E_TITLE_MISMATCH /
   E_RETRACTED / E_STITCHED / E_UNREACHABLE / ... — five verdicts plus the
   reason class, derivable offline); the L4 evidence cascade gains a **fast-judge
   pre-screen route** (with `--fast-judge-url`, suspected mis-citations flagged

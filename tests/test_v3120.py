@@ -40,7 +40,7 @@ class TestExplainRef(unittest.TestCase):
                 note="DOI 在 DOI.org 不存在（404）→ 疑似编造引用")
         out = vr.explain_ref(r)
         self.assertIn("invalid", out)
-        self.assertIn("E_DOU_NOT_FOUND", out)
+        self.assertIn("E_DOI_NOT_FOUND", out)
         self.assertIn("编造引用", out)
         self.assertIn("不得引用", out)
 
@@ -96,9 +96,13 @@ class TestPresetAndCli(unittest.TestCase):
                         src.index('if getattr(args, "doctor", False)'))
 
     def test_explain_wiring_after_citescore(self):
+        # v6.6.0 F64：源码形状锁改空白容忍正则（格式化器重排换行不再破锁）
+        import re
         src = engine_full_text()
-        self.assertIn('if getattr(args, "explain", None) is not None:', src)
-        self.assertIn("explain_ref(target) if target else", src)
+        self.assertIsNotNone(
+            re.search(r'if getattr\(args, "explain", None\) is not None:', src))
+        self.assertIsNotNone(
+            re.search(r"explain_ref\(target\)\s+if\s+target\s+else", src))
 
     def test_explain_missing_index_message(self):
         # 条目不存在时给有效范围提示(边界)
@@ -176,7 +180,7 @@ class TestDocsUsability(unittest.TestCase):
         self.assertEqual(len(vr._ERR_CODE_ZH), 12)
 
     def test_version_bumped(self):
-        self.assertEqual(vr.VERSION, "6.5.0")
+        self.assertEqual(vr.VERSION, "6.6.0")
 
 
 if __name__ == "__main__":

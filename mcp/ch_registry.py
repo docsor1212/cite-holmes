@@ -20,8 +20,6 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from html import escape as html_escape
 from urllib.parse import urlparse, urlunparse, quote
 
-
-
 _ROOT = None  # 由 verify_refs 壳注入
 
 
@@ -30,8 +28,7 @@ def _bind(root):
     _ROOT = root
 
 
-def _cross_lingual_bridge(doi: str, claimed: str, meta: dict,
-                          timeout: float) -> str:
+def _cross_lingual_bridge(doi: str, claimed: str, meta: dict, timeout: float) -> str:
     """v3.10 跨语言标题桥接核验（只补证据、只升不降）：中文期刊常在 Crossref
     登记英文题名而用户引用中文原题，跨语言相似度天然低——v3.0 守卫此时一律
     转 partial 人工核对。本函数依次尝试三级桥接，任一命中即返回一致注记
@@ -50,8 +47,10 @@ def _cross_lingual_bridge(doi: str, claimed: str, meta: dict,
         r = difflib.SequenceMatcher(None, cn, _ROOT._cjk_norm(ot)).ratio()
         if r >= 0.75:
             return f"双语记录 original-title 核验一致（相似度 {r:.2f}）"
-    res_url = (((meta.get("resource") or {}).get("primary") or {})
-               .get("URL")) or f"https://doi.org/{doi}"
+    res_url = (
+        ((meta.get("resource") or {}).get("primary") or {}).get("URL")
+    ) or f"https://doi.org/{doi}"
+
     # 安全门（审计 A1/A2 修复）：注册库/出版商自控 URL——
     # ① scheme 白名单（file: 等 hostname 为空的方案在 ssrf_blocked 放行，须显式拦）；
     # ② 禁自动重定向，手动逐跳跟随并对每一跳重查 SSRF 字面量——
@@ -62,12 +61,11 @@ def _cross_lingual_bridge(doi: str, claimed: str, meta: dict,
 
     html = _ROOT._fetch_landing_html(res_url, timeout)
     if html:
-        m = (re.search(r'<meta[^>]+name="citation_title"[^>]+content="([^"]+)"',
-                       html, re.I)
-             or re.search(r'<meta[^>]+content="([^"]+)"[^>]+name="citation_title"',
-                          html, re.I)
-             or re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"',
-                          html, re.I))
+        m = (
+            re.search(r'<meta[^>]+name="citation_title"[^>]+content="([^"]+)"', html, re.I)
+            or re.search(r'<meta[^>]+content="([^"]+)"[^>]+name="citation_title"', html, re.I)
+            or re.search(r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"', html, re.I)
+        )
         if m:
             r = difflib.SequenceMatcher(None, cn, _ROOT._cjk_norm(m.group(1))).ratio()
             if r >= 0.75:
@@ -76,26 +74,32 @@ def _cross_lingual_bridge(doi: str, claimed: str, meta: dict,
         # （如攻击者自己论文的参考文献表）出现该题名不构成「同载」证据。
         head_m = re.search(r"<head[^>]*>(.*?)</head>", html, re.I | re.S)
         ttl_m = re.search(r"<title[^>]*>(.*?)</title>", html, re.I | re.S)
-        head_zone = _ROOT._cjk_norm((head_m.group(1) if head_m else "")
-                              + (ttl_m.group(1) if ttl_m else ""))
+        head_zone = _ROOT._cjk_norm(
+            (head_m.group(1) if head_m else "") + (ttl_m.group(1) if ttl_m else "")
+        )
         if cn in head_zone:
             return "DOI 落地页同载声称中文原题（双语页命中）"
     if len(cn) >= 12 and (_ROOT._OPTS.get("openalex_key") or ""):
         try:
             q = quote(claimed.strip(), safe="")
-            url = (f"https://api.openalex.org/works?search={q}&per-page=1"
-                   f"&select=display_name&api_key={quote(_ROOT._OPTS['openalex_key'], safe='')}")
+            url = (
+                f"https://api.openalex.org/works?search={q}&per-page=1"
+                f"&select=display_name&api_key={quote(_ROOT._OPTS['openalex_key'], safe='')}"
+            )
             if _ROOT._cb_open(url):
                 return ""
-            req = urllib.request.Request(url, headers={
-                "User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+            req = urllib.request.Request(
+                url, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"}
+            )
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 _ROOT._cb_record(url, False)
-                hits = (json.loads(resp.read().decode("utf-8", "ignore"))
-                        or {}).get("results") or []
+                hits = (json.loads(resp.read().decode("utf-8", "ignore")) or {}).get(
+                    "results"
+                ) or []
             if hits:
                 r = difflib.SequenceMatcher(
-                    None, cn, _ROOT._cjk_norm(hits[0].get("display_name"))).ratio()
+                    None, cn, _ROOT._cjk_norm(hits[0].get("display_name"))
+                ).ratio()
                 if r >= 0.75:
                     return f"OpenAlex 原语言题名核验一致（相似度 {r:.2f}）"
         except Exception:
@@ -103,8 +107,9 @@ def _cross_lingual_bridge(doi: str, claimed: str, meta: dict,
     return ""
 
 
-def doi_metadata_match(doi: str, title: str, year, timeout: float,
-                       source: str = "", authors: str = "") -> tuple:
+def doi_metadata_match(
+    doi: str, title: str, year, timeout: float, source: str = "", authors: str = ""
+) -> tuple:
     """DOI 元数据交叉验证（v1.4）：doi.org 内容协商取官方登记的 CSL 元数据，
     与引用声称的标题/年份比对——专抓「真 DOI 假论文」这类最像真引用的伪造。
     v1.6 新增：期刊名一致性核查（复用已取回的 container-title，零网络成本；
@@ -118,26 +123,34 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
     v3.6 --cn 模式：doi.org 三试全败时回源 api.crossref.org/works/{doi}
     （独立主机，CN 出口常与 doi.org 不同命运），同 CSL 格式无缝续用。"""
     import difflib
+
     cb_url = f"https://doi.org/{doi}"
     if _ROOT._cb_open(cb_url):
         return "", _ROOT._cb_skip_note(cb_url) + "，未做 DOI 元数据核验", False, None
     mailto = _ROOT._OPTS.get("mailto") or ""
     # doi.org 走 UA 联系方式（不加 query 参数——避免干扰个别 DOI 的解析行为）；
     # api.crossref.org 才用 ?mailto= polite pool 约定
-    ua_contact = (f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research "
-                  "(https://skillhub.cn/skills/cite-holmes)")
+    ua_contact = (
+        f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research "
+        "(https://skillhub.cn/skills/cite-holmes)"
+    )
     if mailto:
         ua_contact += f" mailto:{mailto}"
     req_url = cb_url
-    ua_rot = [ua_contact,
-              f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION}; +verified-deep-research)"]
+    ua_rot = [
+        ua_contact,
+        f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION}; +verified-deep-research)",
+    ]
     meta, fetch_err = None, ""
     retry_after = 0.0
     for attempt in range(3):
         req = urllib.request.Request(
-            req_url, headers={
+            req_url,
+            headers={
                 "Accept": "application/vnd.citationstyles.csl+json",
-                "User-Agent": ua_rot[min(attempt, 1)]})
+                "User-Agent": ua_rot[min(attempt, 1)],
+            },
+        )
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 meta = json.loads(resp.read().decode("utf-8", "ignore"))
@@ -167,8 +180,9 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
         # 独立主机不计入 doi.org 断路器；失败静默回原路径。
         try:
             cr_url = f"https://api.crossref.org/works/{quote(doi, safe='()/')}"
-            cr_req = urllib.request.Request(cr_url, headers={
-                "User-Agent": ua_contact, "Accept": "application/json"})
+            cr_req = urllib.request.Request(
+                cr_url, headers={"User-Agent": ua_contact, "Accept": "application/json"}
+            )
             with urllib.request.urlopen(cr_req, timeout=timeout) as resp:
                 meta = json.loads(resp.read().decode("utf-8", "ignore")).get("message") or {}
             fetch_err = f"doi.org 失败({fetch_err})→Crossref 回源成功"
@@ -179,16 +193,14 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
         return "", f"DOI 元数据获取失败（{fetch_err}），跳过内容核验", False, None
     mt = meta.get("title")
     meta_title = (mt[0] if isinstance(mt, list) else mt) or ""
-    sim = difflib.SequenceMatcher(None, (title or "").lower(),
-                                  str(meta_title).lower()).ratio()
+    sim = difflib.SequenceMatcher(None, (title or "").lower(), str(meta_title).lower()).ratio()
     meta_year = None
     parts = (meta.get("issued") or {}).get("date-parts") or []
     if parts and parts[0]:
         meta_year = parts[0][0]
     # v3.6:注册库权威元数据摘要(GB/T 7714 导出原料)——作者按 GB/T 缩写惯例
     # 预格式化(拉丁:姓全大写+名首字母;CJK:全名),container/year/vol/issue/page 原样
-    prov = ("；DOI 元数据经 Crossref 回源（CN 模式）"
-            if "Crossref 回源成功" in fetch_err else "")
+    prov = "；DOI 元数据经 Crossref 回源（CN 模式）" if "Crossref 回源成功" in fetch_err else ""
 
     def _gbt_author(a):
         fam = (a.get("family") or "").strip()
@@ -201,13 +213,19 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
 
     _ct = meta.get("container-title")
     _container = (_ct[0] if isinstance(_ct, list) and _ct else _ct) or ""
-    csl = {"title": str(meta_title)[:300],
-           "authors": [x for x in (_gbt_author(a) for a in (meta.get("author") or [])
-                                   if isinstance(a, dict)) if x],
-           "container": str(_container)[:200], "year": meta_year,
-           "volume": str(meta.get("volume") or "")[:32],
-           "issue": str(meta.get("issue") or "")[:32],
-           "page": str(meta.get("page") or "")[:64]}
+    csl = {
+        "title": str(meta_title)[:300],
+        "authors": [
+            x
+            for x in (_gbt_author(a) for a in (meta.get("author") or []) if isinstance(a, dict))
+            if x
+        ],
+        "container": str(_container)[:200],
+        "year": meta_year,
+        "volume": str(meta.get("volume") or "")[:32],
+        "issue": str(meta.get("issue") or "")[:32],
+        "page": str(meta.get("page") or "")[:64],
+    }
     # v1.6 期刊名一致性核查（零网络成本）：规范化后互不包含视为不符，
     # 降 partial（期刊改名常见，不判 invalid）。
     # 二轮评审 P1 修正：NLM 式缩写（N Engl J Med vs New England Journal of
@@ -218,6 +236,7 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
     jadj, jnote = "", ""
     src = (source or "").strip()
     if reg_journal and src:
+
         def _nj(s):
             return re.sub(r"[^a-z0-9\u4e00-\u9fff]+", "", str(s).lower())
 
@@ -228,7 +247,8 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
             j = 0
             for st in short_toks:
                 while j < len(long_toks) and not (
-                        long_toks[j].startswith(st) or st[0] == long_toks[j][0]):
+                    long_toks[j].startswith(st) or st[0] == long_toks[j][0]
+                ):
                     j += 1
                 if j >= len(long_toks):
                     return False
@@ -250,8 +270,10 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
 
         if not _journal_same(src, reg_journal):
             jadj = "partial"
-            jnote = (f"；期刊名不符（声称 {str(src)[:40]} / DOI 登记 "
-                     f"{str(reg_journal)[:40]}）→ 建议核对是否引错论文")
+            jnote = (
+                f"；期刊名不符（声称 {str(src)[:40]} / DOI 登记 "
+                f"{str(reg_journal)[:40]}）→ 建议核对是否引错论文"
+            )
     # v1.7 作者名一致性核查（复用 CSL author，零网络成本）：任一声称姓氏命中
     # 登记列表即视为一致（拼写/变体从宽）；全部不命中才降 partial。
     aadj, anote = "", ""
@@ -259,32 +281,60 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
     if claimed and not _ROOT._author_consistent(claimed, meta.get("author")):
         aadj = "partial"
         more = " 等" if len([c for c in (_ROOT._norm_name(x) for x in claimed) if c]) > 1 else ""
-        anote = (f"；作者不符（声称 {claimed[0]}{more} 未见于 DOI 登记作者列表）"
-                 f"→ 建议核对是否引错论文")
+        anote = (
+            f"；作者不符（声称 {claimed[0]}{more} 未见于 DOI 登记作者列表）"
+            f"→ 建议核对是否引错论文"
+        )
     if not title:
-        return (jadj or aadj), (f"DOI 元数据核验完成（引用未提供标题，无法比对；"
-                                f"登记年份 {meta_year or '未知'}）{jnote}{anote}"), True, csl
+        return (
+            (jadj or aadj),
+            (
+                f"DOI 元数据核验完成（引用未提供标题，无法比对；"
+                f"登记年份 {meta_year or '未知'}）{jnote}{anote}"
+            ),
+            True,
+            csl,
+        )
     # v3.15 文字系统守卫（原 v3.0 仅 CJK）：声称与登记的主导文字系统不同
     # （中俄/希/日/韩 vs 拉丁等任意跨族组合）即视为跨语言——不判 invalid。
     # v3.10 三级桥接核验对各族同样适用（original-title/落地页/OpenAlex）。
     _sf_claim, _sf_reg = _ROOT._script_family(title), _ROOT._script_family(meta_title)
-    if title and sim < 0.50 and _sf_claim != "none" and _sf_reg != "none" \
-            and _sf_claim != _sf_reg:
+    if title and sim < 0.50 and _sf_claim != "none" and _sf_reg != "none" and _sf_claim != _sf_reg:
         bridge = _ROOT._cross_lingual_bridge(doi, title, meta, timeout)
         if bridge:
             # 审计 B1 修复：桥接只解决「标题跨语言不可比」，期刊/作者不符信号
             # 必须原样透出——桥接命中≠整条引用干净，jadj/aadj 参与最终 adjust，
             # jnote/anote 拼回 note（与下方常规路径同款拼接）。
             # 契约:adjust ∈ {"", "partial", "invalid"}——一致=空串(verify_one 视为无调整)
-            return (jadj or aadj), (f"DOI 元数据核验一致（跨语言桥接：{bridge}；"
-                                    f"登记题名《{str(meta_title)[:60]}》）{jnote}{anote}"
-                                    ), True, csl
-        return "partial", (f"跨语言标题无法机器比对（声称 {_sf_claim} 文 vs 登记 "
-                           f"{_sf_reg} 文,相似度 {sim:.2f}；桥接核验未命中）{jnote}{anote}"
-                           f"→ 建议人工核对"), True, csl
+            return (
+                (jadj or aadj),
+                (
+                    f"DOI 元数据核验一致（跨语言桥接：{bridge}；"
+                    f"登记题名《{str(meta_title)[:60]}》）{jnote}{anote}"
+                ),
+                True,
+                csl,
+            )
+        return (
+            "partial",
+            (
+                f"跨语言标题无法机器比对（声称 {_sf_claim} 文 vs 登记 "
+                f"{_sf_reg} 文,相似度 {sim:.2f}；桥接核验未命中）{jnote}{anote}"
+                f"→ 建议人工核对"
+            ),
+            True,
+            csl,
+        )
     if title and sim < 0.50:
-        return "invalid", (f"DOI 元数据标题相似度仅 {sim:.2f} → DOI 指向的不是这篇论文，"
-                           f"疑似编造或错引（DOI 实际为《{str(meta_title)[:60]}》）"), True, csl
+        return (
+            "invalid",
+            (
+                f"DOI 元数据标题相似度仅 {sim:.2f} → DOI 指向的不是这篇论文，"
+                f"疑似编造或错引（DOI 实际为《{str(meta_title)[:60]}》）"
+            ),
+            True,
+            csl,
+        )
     year_note = ""
     if meta_year and year:
         try:
@@ -298,17 +348,35 @@ def doi_metadata_match(doi: str, title: str, year, timeout: float,
         # major=题名明显偏差[0.50-0.68]仍非编造），对齐 CITECHECK 行业前沿
         # 的 Exact/Minor/Major 分层；"完全编造"仍由 invalid 独占。
         _fid = "minor" if sim >= 0.68 else "major"
-        return "partial", (f"[元数据漂移:{_fid}] DOI 元数据标题相似度 {sim:.2f}，"
-                           f"建议人工复核{year_note}{jnote}{anote}{prov}"), True, csl
+        return (
+            "partial",
+            (
+                f"[元数据漂移:{_fid}] DOI 元数据标题相似度 {sim:.2f}，"
+                f"建议人工复核{year_note}{jnote}{anote}{prov}"
+            ),
+            True,
+            csl,
+        )
     if jadj or aadj:
         # 期刊更名/作者变体级偏差=minor（题名一致，字段级漂移）
-        return (jadj or aadj), (f"[元数据漂移:minor] DOI 元数据核验一致（相似度 "
-                                f"{sim:.2f}）{year_note}{jnote}{anote}{prov}"), True, csl
-    return (jadj or aadj), f"DOI 元数据核验一致（相似度 {sim:.2f}）{year_note}{jnote}{anote}{prov}", True, csl
+        return (
+            (jadj or aadj),
+            (
+                f"[元数据漂移:minor] DOI 元数据核验一致（相似度 "
+                f"{sim:.2f}）{year_note}{jnote}{anote}{prov}"
+            ),
+            True,
+            csl,
+        )
+    return (
+        (jadj or aadj),
+        f"DOI 元数据核验一致（相似度 {sim:.2f}）{year_note}{jnote}{anote}{prov}",
+        True,
+        csl,
+    )
 
 
-def pubmed_title_reverse_lookup(title: str, source: str, year,
-                                timeout: float) -> tuple:
+def pubmed_title_reverse_lookup(title: str, source: str, year, timeout: float) -> tuple:
     """v4.0.0 Vancouver 医学引用的 PubMed 题名反查（无标识符引用的官方核验通道）。
 
     医学文档参考文献的主流形态是 Vancouver 纯文本（作者. 题名. 期刊. 年;卷(期):页.），
@@ -339,12 +407,44 @@ def pubmed_title_reverse_lookup(title: str, source: str, year,
     # （PubMed phrase 索引 tokenize 问题）——改用区分性实词 AND 组合：
     # 题名实词按长度降序取 5 个，逐词 [Title] AND（真身命中验证：
     # ACR/EULAR SSc 分类标准 → PMID 24122180 ✓）
-    stop = {"the", "and", "for", "with", "from", "of", "in", "on", "a", "an", "to",
-            "by", "at", "is", "are", "via", "after", "before", "during", "into",
-            "over", "under", "between", "among", "against", "without", "within",
-            "upon", "than", "that", "this", "these", "those", "its", "their"}
-    words = [w for w in re.findall(r"[A-Za-z\u4e00-\u9fff0-9]{2,}", q)
-             if w.lower() not in stop]
+    stop = {
+        "the",
+        "and",
+        "for",
+        "with",
+        "from",
+        "of",
+        "in",
+        "on",
+        "a",
+        "an",
+        "to",
+        "by",
+        "at",
+        "is",
+        "are",
+        "via",
+        "after",
+        "before",
+        "during",
+        "into",
+        "over",
+        "under",
+        "between",
+        "among",
+        "against",
+        "without",
+        "within",
+        "upon",
+        "than",
+        "that",
+        "this",
+        "these",
+        "those",
+        "its",
+        "their",
+    }
+    words = [w for w in re.findall(r"[A-Za-z\u4e00-\u9fff0-9]{2,}", q) if w.lower() not in stop]
     words.sort(key=len, reverse=True)
     if len(words) < 2:  # v4.1.0：<3 → ≥2（短题名规范文献反查，如 "Scleroderma in children"）
         return "", "", False, "", False
@@ -356,14 +456,16 @@ def pubmed_title_reverse_lookup(title: str, source: str, year,
         if len(words) < nwords:
             continue
         term = " AND ".join(f"{w}[Title]" for w in words[:nwords])
-        u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-             + _ROOT._ncbi_qs(f"?db=pubmed&retmode=json&retmax=8&sort=relevance&term={quote(term)}"))
+        u = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi" + _ROOT._ncbi_qs(
+            f"?db=pubmed&retmode=json&retmax=8&sort=relevance&term={quote(term)}"
+        )
         if _ROOT._cb_open(u):
             return "", "", False, "", False
         _ROOT._ncbi_rate_wait()
         try:
             req = urllib.request.Request(
-                u, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+                u, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"}
+            )
             with _ROOT._urlopen_retry(req, timeout) as resp:
                 j = json.loads(resp.read().decode("utf-8", "ignore"))
             _ROOT._cb_record(u, False)
@@ -371,8 +473,17 @@ def pubmed_title_reverse_lookup(title: str, source: str, year,
         except urllib.error.HTTPError as e:
             _ROOT._cb_record(u, False)
             # 限流可观测：429/403 让调用方知道「没搜成」而非「搜了没命中」
-            return "", (f"PubMed 反查限流（HTTP {e.code}）——建议 NCBI_API_KEY 或分批"
-                        if e.code in (429, 403) else ""), False, "", False
+            return (
+                "",
+                (
+                    f"PubMed 反查限流（HTTP {e.code}）——建议 NCBI_API_KEY 或分批"
+                    if e.code in (429, 403)
+                    else ""
+                ),
+                False,
+                "",
+                False,
+            )
         except Exception:
             _ROOT._cb_record(u, True)
             # v4.1.0：传输失败（重试后仍不通）可观测——绝不与「查无」混淆
@@ -384,30 +495,47 @@ def pubmed_title_reverse_lookup(title: str, source: str, year,
     ids = list(dict.fromkeys(ids_all))
     if not ids:
         if net_err:
-            return "", ("PubMed 反查未完成（网络传输失败，已重试）——非查无；"
-                        "网络恢复后复跑可完成核验"), False, "", True
+            return (
+                "",
+                ("PubMed 反查未完成（网络传输失败，已重试）——非查无；" "网络恢复后复跑可完成核验"),
+                False,
+                "",
+                True,
+            )
         return "", "", False, "", False
     ids = ids[:24]
-    u2 = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
-          + _ROOT._ncbi_qs(f"?db=pubmed&retmode=json&id={','.join(ids)}"))
+    u2 = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi" + _ROOT._ncbi_qs(
+        f"?db=pubmed&retmode=json&id={','.join(ids)}"
+    )
     if _ROOT._cb_open(u2):
         return "", "", False, "", False
     _ROOT._ncbi_rate_wait()
     try:
         req = urllib.request.Request(
-            u2, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+            u2, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"}
+        )
         with _ROOT._urlopen_retry(req, timeout) as resp:
             _ROOT._cb_record(u2, False)
             j2 = json.loads(resp.read().decode("utf-8", "ignore"))
     except urllib.error.HTTPError as e:
         _ROOT._cb_record(u2, False)
         # 审计 P3:esummary 限流与 esearch 同款可观测
-        return "", (f"PubMed 反查限流（HTTP {e.code}）" if e.code in (429, 403)
-                    else ""), False, "", False
+        return (
+            "",
+            (f"PubMed 反查限流（HTTP {e.code}）" if e.code in (429, 403) else ""),
+            False,
+            "",
+            False,
+        )
     except Exception:
         _ROOT._cb_record(u2, True)
-        return "", ("PubMed 反查未完成（网络传输失败，已重试）——非查无；"
-                    "网络恢复后复跑可完成核验"), False, "", True
+        return (
+            "",
+            ("PubMed 反查未完成（网络传输失败，已重试）——非查无；" "网络恢复后复跑可完成核验"),
+            False,
+            "",
+            True,
+        )
     best = None  # (sim, pmid, meta_title, meta_source, meta_year)
     for pid in ids:
         doc = (j2.get("result") or {}).get(pid) or {}
@@ -432,15 +560,21 @@ def pubmed_title_reverse_lookup(title: str, source: str, year,
             best = (sim, pid, mt, ms, my)
     if best and best[0] >= 0.82:
         sim, pid, mt, ms, my = best
-        note = (f"PubMed 题名反查核验一致（PMID:{pid}；登记题名《{mt[:60]}》"
-                f"{'·' + ms if ms else ''}{'·' + str(my) if my else ''}）")
+        note = (
+            f"PubMed 题名反查核验一致（PMID:{pid}；登记题名《{mt[:60]}》"
+            f"{'·' + ms if ms else ''}{'·' + str(my) if my else ''}）"
+        )
         return "", note, True, pid, False
     if best and best[0] >= 0.50:
         sim, pid, mt, ms, my = best
-        return ("partial",
-                f"PubMed 题名反查近似命中（PMID:{pid}，相似度 {sim:.2f}，"
-                f"登记题名《{mt[:60]}》）→ 人工核对是否同一篇",
-                True, pid, False)
+        return (
+            "partial",
+            f"PubMed 题名反查近似命中（PMID:{pid}，相似度 {sim:.2f}，"
+            f"登记题名《{mt[:60]}》）→ 人工核对是否同一篇",
+            True,
+            pid,
+            False,
+        )
     return "", "", False, "", False
 
 
@@ -455,13 +589,18 @@ def unpaywall_lookup(doi: str, mailto: str, timeout: float) -> dict:
     返回 {}（失败/未收录——静默，绝不参与判定）或
     {"is_oa": bool, "license": str, "oa_url": str}。纯数据富集：只回答
     「这篇有没有免费全文、什么许可」，是综述工作流的选读信号。"""
-    url = ("https://api.unpaywall.org/v2/" + quote(doi, safe="")
-           + "?email=" + quote(mailto or "", safe=""))
+    url = (
+        "https://api.unpaywall.org/v2/"
+        + quote(doi, safe="")
+        + "?email="
+        + quote(mailto or "", safe="")
+    )
     if _ROOT._cb_open(url):
         return {}
     try:
         req = urllib.request.Request(
-            url, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+            url, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"}
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             _ROOT._cb_record(url, False)
             j = json.loads(resp.read().decode("utf-8", "ignore")) or {}
@@ -474,24 +613,31 @@ def unpaywall_lookup(doi: str, mailto: str, timeout: float) -> dict:
     if not j.get("is_oa"):
         return {"is_oa": False}
     best = j.get("best_oa_location") or {}
-    return {"is_oa": True,
-            "license": str(best.get("license") or "")[:24],
-            "oa_url": str(best.get("url") or "")[:160]}
+    return {
+        "is_oa": True,
+        "license": str(best.get("license") or "")[:24],
+        "oa_url": str(best.get("url") or "")[:160],
+    }
 
 
 def _open_access_enrich(out: dict, timeout: float) -> None:
     """v5.6.0 OA 接线 helper：verified+DOI+mailto 三门齐全才查 Unpaywall，
     结果写 checks.open_access（纯数据富集，判定永不改——ADR-0005）。"""
-    if (not _ROOT._OPTS.get("mailto") or not out.get("doi")
-            or not _ROOT.DOI_RE.match(out["doi"]) or out["verdict"] != "verified"):
+    if (
+        not _ROOT._OPTS.get("mailto")
+        or not out.get("doi")
+        or not _ROOT.DOI_RE.match(out["doi"])
+        or out["verdict"] != "verified"
+    ):
         return
     oa = _ROOT.unpaywall_lookup(out["doi"], _ROOT._OPTS["mailto"], timeout)
     if oa:
         out["checks"]["open_access"] = dict(oa, ran=True)
 
 
-def pubmed_locator_lookup(source: str, year, volume, issue, pages,
-                          timeout: float, claimed_title: str = "") -> tuple:
+def pubmed_locator_lookup(
+    source: str, year, volume, issue, pages, timeout: float, claimed_title: str = ""
+) -> tuple:
     """v4.2.0 卷期页锚定核验（PubMed Single Citation Matcher 的 E-utilities 形态）。
 
     GB/T 7714 中文医学引用的第二个无标识符通道：期刊+年+卷(期):页 是 PubMed
@@ -521,14 +667,16 @@ def pubmed_locator_lookup(source: str, year, volume, issue, pages,
     if pg:
         parts.append(f"{pg}[PG]")
     term = " AND ".join(parts)
-    u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi"
-         + _ROOT._ncbi_qs(f"?db=pubmed&retmode=json&retmax=4&sort=relevance&term={quote(term)}"))
+    u = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esearch.fcgi" + _ROOT._ncbi_qs(
+        f"?db=pubmed&retmode=json&retmax=4&sort=relevance&term={quote(term)}"
+    )
     if _ROOT._cb_open(u):
         return "", "", False, "", False
     _ROOT._ncbi_rate_wait()
     try:
         req = urllib.request.Request(
-            u, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+            u, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"}
+        )
         with _ROOT._urlopen_retry(req, timeout) as resp:
             j = json.loads(resp.read().decode("utf-8", "ignore"))
         _ROOT._cb_record(u, False)
@@ -537,23 +685,34 @@ def pubmed_locator_lookup(source: str, year, volume, issue, pages,
         ids = [str(x) for x in (er.get("idlist") or [])]
     except urllib.error.HTTPError as e:
         _ROOT._cb_record(u, False)
-        return "", (f"PubMed 卷期页锚定限流（HTTP {e.code}）——建议 NCBI_API_KEY 或分批"
-                    if e.code in (429, 403) else ""), False, "", False
+        return (
+            "",
+            (
+                f"PubMed 卷期页锚定限流（HTTP {e.code}）——建议 NCBI_API_KEY 或分批"
+                if e.code in (429, 403)
+                else ""
+            ),
+            False,
+            "",
+            False,
+        )
     except Exception:
         _ROOT._cb_record(u, True)
-        return "", ("PubMed 卷期页锚定未完成（网络传输失败，已重试）——非查无"
-                    ), False, "", True
+        return "", ("PubMed 卷期页锚定未完成（网络传输失败，已重试）——非查无"), False, "", True
     if count == 1 and ids:
         pid = ids[0]
         # 取登记题名进注记（透明底稿；中文声称 vs 登记题名语言差异如实展示）
         mt = ""
-        u2 = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
-              + _ROOT._ncbi_qs(f"?db=pubmed&retmode=json&id={pid}"))
+        u2 = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi" + _ROOT._ncbi_qs(
+            f"?db=pubmed&retmode=json&id={pid}"
+        )
         if not _ROOT._cb_open(u2):
             _ROOT._ncbi_rate_wait()
             try:
                 req2 = urllib.request.Request(
-                    u2, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+                    u2,
+                    headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"},
+                )
                 with _ROOT._urlopen_retry(req2, timeout) as resp2:
                     j2 = json.loads(resp2.read().decode("utf-8", "ignore"))
                 _ROOT._cb_record(u2, False)
@@ -566,15 +725,34 @@ def pubmed_locator_lookup(source: str, year, volume, issue, pages,
         # verified）；跨文字系统（中文声称 vs 登记英文）维持语言无关语义
         if claimed_title and mt:
             import difflib
-            _sim = difflib.SequenceMatcher(None, str(claimed_title).strip().lower(),
-                                           re.sub(r"\s+", " ", mt).strip().lower()).ratio()
+
+            _sim = difflib.SequenceMatcher(
+                None, str(claimed_title).strip().lower(), re.sub(r"\s+", " ", mt).strip().lower()
+            ).ratio()
             _sf_c, _sf_r = _ROOT._script_family(str(claimed_title)), _ROOT._script_family(mt)
             if _sf_c != "none" and _sf_r != "none" and _sf_c == _sf_r and _sim < 0.50:
-                return "partial", (f"卷期页唯一定位到 PMID:{pid}，但同语言登记题名"
-                                   f"《{mt[:60]}》与声称题名相似度仅 {_sim:.2f}"
-                                   "——疑似错引或拼接，转人工"), False, "", False
-        return "", (f"PubMed 卷期页锚定核验一致（PMID:{pid}；TA:{ta}"
-                    + (f"；登记题名《{mt[:60]}》" if mt else "") + "）"), True, pid, False
+                return (
+                    "partial",
+                    (
+                        f"卷期页唯一定位到 PMID:{pid}，但同语言登记题名"
+                        f"《{mt[:60]}》与声称题名相似度仅 {_sim:.2f}"
+                        "——疑似错引或拼接，转人工"
+                    ),
+                    False,
+                    "",
+                    False,
+                )
+        return (
+            "",
+            (
+                f"PubMed 卷期页锚定核验一致（PMID:{pid}；TA:{ta}"
+                + (f"；登记题名《{mt[:60]}》" if mt else "")
+                + "）"
+            ),
+            True,
+            pid,
+            False,
+        )
     if count >= 2:
         return "", (f"卷期页定位到 {count} 条（歧义）——转人工判定"), False, "", False
     return "", "", False, "", False
@@ -587,14 +765,16 @@ def pubmed_pmid_exists(pmid: str, timeout: float) -> tuple:
     无法区分真假——AI 编造的 PMID 必须靠 API 核实才能抓住。
     返回 (exists, note)。
     """
-    u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
-         + _ROOT._ncbi_qs(f"?db=pubmed&id={pmid}&retmode=json"))
+    u = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi" + _ROOT._ncbi_qs(
+        f"?db=pubmed&id={pmid}&retmode=json"
+    )
     if _ROOT._cb_open(u):
         return True, _ROOT._cb_skip_note(u) + "，按可达处理"
     _ROOT._ncbi_rate_wait()
     try:
         req = urllib.request.Request(
-            u, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+            u, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"}
+        )
         with urllib.request.urlopen(req, timeout=timeout) as resp:
             j = json.loads(resp.read().decode("utf-8", "ignore"))
         _ROOT._cb_record(u, False)
@@ -616,8 +796,9 @@ def pmid_doi_crosscheck(pmid: str, doi: str, timeout: float) -> tuple:
     DOI 是 B 论文的）。取 PMID 在 PubMed 登记的 DOI 与声称 DOI 比对：
     不一致 → invalid「拼接伪造特征」；一致 → 加一致备注；登记无 DOI → 跳过。
     返回 (adjust, note)，adjust ∈ {"", "invalid"}。断路器生效。"""
-    u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
-         + _ROOT._ncbi_qs(f"?db=pubmed&id={pmid}&retmode=json"))
+    u = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi" + _ROOT._ncbi_qs(
+        f"?db=pubmed&id={pmid}&retmode=json"
+    )
     if _ROOT._cb_open(u):
         return "", _ROOT._cb_skip_note(u) + "，DOI↔PMID 交叉未做"
     _ROOT._ncbi_rate_wait()
@@ -628,7 +809,8 @@ def pmid_doi_crosscheck(pmid: str, doi: str, timeout: float) -> tuple:
     for attempt in range(3):
         try:
             req = urllib.request.Request(
-                u, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+                u, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"}
+            )
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 j = json.loads(resp.read().decode("utf-8", "ignore"))
             break
@@ -640,8 +822,10 @@ def pmid_doi_crosscheck(pmid: str, doi: str, timeout: float) -> tuple:
             last_exc = e
             time.sleep(1.5 * (attempt + 1))
     if j is None:
-        return "", (f"E-utilities 交叉查询失败（{type(last_exc).__name__}×3 重试后仍失败），"
-                    "跳过 DOI↔PMID 交叉")
+        return "", (
+            f"E-utilities 交叉查询失败（{type(last_exc).__name__}×3 重试后仍失败），"
+            "跳过 DOI↔PMID 交叉"
+        )
     _ROOT._cb_record(u, False)
     res = j.get("result") or {}
     item = res.get(str(pmid)) or {}
@@ -654,9 +838,10 @@ def pmid_doi_crosscheck(pmid: str, doi: str, timeout: float) -> tuple:
         return "", "PMID 未登记 DOI，跳过 DOI↔PMID 交叉"
     if reg.lower().rstrip(".").rstrip("/") == doi.lower().strip().rstrip(".").rstrip("/"):
         return "", "DOI↔PMID 交叉一致（两键指向同一论文）"
-    return "invalid", (f"DOI 与 PMID 指向不同论文（PMID {pmid} 登记为 {reg}，"
-                       f"引用声称 {doi}）→ 拼接伪造特征，疑似编造引用")
-
+    return "invalid", (
+        f"DOI 与 PMID 指向不同论文（PMID {pmid} 登记为 {reg}，"
+        f"引用声称 {doi}）→ 拼接伪造特征，疑似编造引用"
+    )
 
 
 def _pmid_reg_doi(item: dict) -> str:
@@ -675,8 +860,10 @@ def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float
     +期刊一致性(不透明缩写展开,不符降 partial——期刊改名常见不判 invalid)。
     返回 (adjust, note, matched),adjust ∈ {"", "partial", "invalid"}。"""
     import difflib
-    u = ("https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi"
-         + _ROOT._ncbi_qs(f"?db=pubmed&id={pmid}&retmode=json"))
+
+    u = "https://eutils.ncbi.nlm.nih.gov/entrez/eutils/esummary.fcgi" + _ROOT._ncbi_qs(
+        f"?db=pubmed&id={pmid}&retmode=json"
+    )
     if _ROOT._cb_open(u):
         return "", _ROOT._cb_skip_note(u) + "，PMID 元数据核验未做", False
     _ROOT._ncbi_rate_wait()
@@ -685,7 +872,8 @@ def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float
     for attempt in range(3):
         try:
             req = urllib.request.Request(
-                u, headers={"User-Agent": f"cite-holmes/{'3.4'}; +verified-deep-research"})
+                u, headers={"User-Agent": f"cite-holmes/{'3.4'}; +verified-deep-research"}
+            )
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 j = json.loads(resp.read().decode("utf-8", "ignore"))
             break
@@ -697,8 +885,11 @@ def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float
             last_exc = e
             time.sleep(1.5 * (attempt + 1))
     if j is None:
-        return "", (f"E-utilities 元数据获取失败（{type(last_exc).__name__}×3），"
-                    "跳过 PMID 内容核验"), False
+        return (
+            "",
+            (f"E-utilities 元数据获取失败（{type(last_exc).__name__}×3），" "跳过 PMID 内容核验"),
+            False,
+        )
     _ROOT._cb_record(u, False)
     res = j.get("result") or {}
     item = res.get(str(pmid)) or {}
@@ -707,8 +898,9 @@ def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float
     mt = item.get("title") or ""
     matched = False
     if title:
-        sim = difflib.SequenceMatcher(None, str(title).strip().lower(),
-                                      re.sub(r"\s+", " ", mt).strip().lower()).ratio()
+        sim = difflib.SequenceMatcher(
+            None, str(title).strip().lower(), re.sub(r"\s+", " ", mt).strip().lower()
+        ).ratio()
         if sim < 0.50:
             # v4.2.0 文字系统守卫（与 DOI 通路同语义；家族铁律：语言差异绝不作
             # 编造依据）——真网实锤：中文指南 39429074 声称中文题名 vs 登记英文
@@ -717,39 +909,69 @@ def pmid_metadata_match(pmid: str, title: str, source: str, year, timeout: float
             _sf_c, _sf_r = _ROOT._script_family(str(title)), _ROOT._script_family(mt)
             if _sf_c != "none" and _sf_r != "none" and _sf_c != _sf_r:
                 reg_doi = _pmid_reg_doi(item)
-                bridge = (_ROOT._cross_lingual_bridge(reg_doi, str(title),
-                                                {"title": mt}, timeout)
-                          if reg_doi and _ROOT.DOI_RE.match(reg_doi) else "")
+                bridge = (
+                    _ROOT._cross_lingual_bridge(reg_doi, str(title), {"title": mt}, timeout)
+                    if reg_doi and _ROOT.DOI_RE.match(reg_doi)
+                    else ""
+                )
                 if bridge:
-                    return "", (f"PMID 元数据核验一致（跨语言桥接：{bridge}；"
-                                f"登记题名《{mt[:60]}》）"), True
-                return "partial", (f"跨语言标题无法机器比对（声称 {_sf_c} 文 vs 登记 "
-                                   f"{_sf_r} 文,相似度 {sim:.2f}）→ 建议人工核对"), False
+                    return (
+                        "",
+                        (f"PMID 元数据核验一致（跨语言桥接：{bridge}；" f"登记题名《{mt[:60]}》）"),
+                        True,
+                    )
+                return (
+                    "partial",
+                    (
+                        f"跨语言标题无法机器比对（声称 {_sf_c} 文 vs 登记 "
+                        f"{_sf_r} 文,相似度 {sim:.2f}）→ 建议人工核对"
+                    ),
+                    False,
+                )
             # v4.3.0 判死前桥接拯救（audit P2：罗马化/翻译题名形态——声称与登记
             # 同属拉丁族但一个是拼音/译名时 sim 天然低）；桥接原料=登记 DOI。
             # 桥接未命中仍判死——同语言假标题的拼接防护不弱化。
             reg_doi = _pmid_reg_doi(item)
             if reg_doi and _ROOT.DOI_RE.match(reg_doi):
-                bridge = _ROOT._cross_lingual_bridge(reg_doi, str(title),
-                                               {"title": mt}, timeout)
+                bridge = _ROOT._cross_lingual_bridge(reg_doi, str(title), {"title": mt}, timeout)
                 if bridge:
-                    return "", (f"PMID 元数据核验一致（跨语言桥接：{bridge}；"
-                                f"登记题名《{mt[:60]}》）"), True
-            return "invalid", (f"PMID 登记标题相似度仅 {sim:.2f}（登记为《{mt[:60]}》）"
-                               "→ 真 PMID 假标题，疑似拼接伪造"), False
+                    return (
+                        "",
+                        (f"PMID 元数据核验一致（跨语言桥接：{bridge}；" f"登记题名《{mt[:60]}》）"),
+                        True,
+                    )
+            return (
+                "invalid",
+                (
+                    f"PMID 登记标题相似度仅 {sim:.2f}（登记为《{mt[:60]}》）"
+                    "→ 真 PMID 假标题，疑似拼接伪造"
+                ),
+                False,
+            )
         if sim < 0.82:
             _fid = "minor" if sim >= 0.68 else "major"  # M5 同规
-            return "partial", (f"[元数据漂移:{_fid}] PMID 登记标题相似度 {sim:.2f}："
-                               f"《{mt[:60]}》，建议人工复核"), False
+            return (
+                "partial",
+                (
+                    f"[元数据漂移:{_fid}] PMID 登记标题相似度 {sim:.2f}："
+                    f"《{mt[:60]}》，建议人工复核"
+                ),
+                False,
+            )
         matched = True
     if source:
         reg_j = item.get("fulljournalname") or item.get("source") or ""
         if reg_j and not _ROOT._journal_consistent(source, reg_j):
-            return "partial", (f"期刊名与 PubMed 登记不符（登记为 {reg_j}，"
-                               "引用声称 " + str(source).strip() + "）——真 PMID 假期刊或改名，"
-                               "降 partial 人工复核"), matched
+            return (
+                "partial",
+                (
+                    f"期刊名与 PubMed 登记不符（登记为 {reg_j}，"
+                    "引用声称 " + str(source).strip() + "）——真 PMID 假期刊或改名，"
+                    "降 partial 人工复核"
+                ),
+                matched,
+            )
     return "", "PMID 元数据核验一致" + (f"：《{mt[:50]}》" if mt else ""), matched
-
 
 
 def _alias_subset(claimed: str, actual: str) -> bool:
@@ -761,21 +983,38 @@ def _alias_subset(claimed: str, actual: str) -> bool:
     → 判 partial 转人工，不再误判 invalid。主 API 路径自 v4.0.1 起已有别名
     容忍，本函数将同一保护对齐到着陆页 fallback 路径（arXiv API 超时触发率不低）。
     至少 2 个有效 token 才认定，防单词偶然命中。"""
-    STOP = {"a", "an", "the", "of", "for", "and", "or", "on", "in", "to",
-            "with", "via", "using", "towards", "toward"}
+    STOP = {
+        "a",
+        "an",
+        "the",
+        "of",
+        "for",
+        "and",
+        "or",
+        "on",
+        "in",
+        "to",
+        "with",
+        "via",
+        "using",
+        "towards",
+        "toward",
+    }
 
     def toks(s):
-        return {t for t in re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ",
-                                  (s or "").lower()).split()
-                if t not in STOP and len(t) >= 2}
+        return {
+            t
+            for t in re.sub(r"[^a-z0-9\u4e00-\u9fff]+", " ", (s or "").lower()).split()
+            if t not in STOP and len(t) >= 2
+        }
+
     ct, at = toks(claimed), toks(actual)
     if len(ct) < 2 or not at:
         return False
     return ct.issubset(at) or at.issubset(ct)
 
 
-def _arxiv_landing_fallback(arxiv_id: str, title: str, timeout: float,
-                            api_err: str) -> tuple:
+def _arxiv_landing_fallback(arxiv_id: str, title: str, timeout: float, api_err: str) -> tuple:
     """v1.11 arXiv 第二源 fallback（判定确定性保卫）：export.arxiv.org API 偶发
     406/403——批内多条 arXiv 引用时即便有 3 秒全局控频仍可撞上其反机器人窗口
     （实测单发全 200、批内稳定 406）。此前 API 失败即静默跳过内容核验，导致同一
@@ -787,22 +1026,36 @@ def _arxiv_landing_fallback(arxiv_id: str, title: str, timeout: float,
     返回 (adjust, note, matched)，语义同 arxiv_metadata_match。"""
     landing = "https://arxiv.org/abs/" + quote(arxiv_id, safe="")
     if _ROOT.ssrf_blocked(landing):  # 与 wayback 同款守卫（域名固定，防御性一致）
-        return "", (f"arXiv 元数据获取失败（{api_err}），着陆页核验跳过（SSRF 防护），"
-                    "元数据核验未完成"), False
+        return (
+            "",
+            (
+                f"arXiv 元数据获取失败（{api_err}），着陆页核验跳过（SSRF 防护），"
+                "元数据核验未完成"
+            ),
+            False,
+        )
     if _ROOT._cb_open(landing):
-        return "", (f"arXiv 元数据获取失败（{api_err}），着陆页核验跳过（断路器/降级），"
-                    "元数据核验未完成"), False
+        return (
+            "",
+            (
+                f"arXiv 元数据获取失败（{api_err}），着陆页核验跳过（断路器/降级），"
+                "元数据核验未完成"
+            ),
+            False,
+        )
     req = urllib.request.Request(
         landing,
-        headers={"User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION};"
-                               " +verified-deep-research)",
-                 "Accept": "text/html"})
+        headers={
+            "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION};"
+            " +verified-deep-research)",
+            "Accept": "text/html",
+        },
+    )
     html_text, err = None, ""
     try:
         # v6.3.1 改走 _urlopen_retry：继承代理自愈（代理在场且传输失败→无代理
         # 直连一试），HTTPError 语义不变（仍即时上抛由本函数分类记账）
-        with _ROOT._urlopen_retry(req, timeout=timeout, attempts=2,
-                                  backoff=1.0) as resp:
+        with _ROOT._urlopen_retry(req, timeout=timeout, attempts=2, backoff=1.0) as resp:
             html_text = resp.read().decode("utf-8", "ignore")
         _ROOT._cb_record(landing, False)
     except urllib.error.HTTPError as e:
@@ -811,39 +1064,71 @@ def _arxiv_landing_fallback(arxiv_id: str, title: str, timeout: float,
         _ROOT._cb_record(landing, False)
         if e.code == 404:
             # 官方着陆页 404 = 官方库查无该 ID（与 verify_one 的 abs 域 404 判定一致）
-            return "invalid", (f"arXiv 元数据 API 失败（{api_err}）后官方着陆页亦 404 → "
-                               "官方库查无该 ID，疑似编造引用"), False
+            return (
+                "invalid",
+                (
+                    f"arXiv 元数据 API 失败（{api_err}）后官方着陆页亦 404 → "
+                    "官方库查无该 ID，疑似编造引用"
+                ),
+                False,
+            )
         err = f"HTTP {e.code}"
     except Exception as e:  # 传输层失败（超时/DNS/拒连）——如实记账
         _ROOT._cb_record(landing, True)
         err = type(e).__name__
     if html_text is None:
-        return "", (f"arXiv 元数据获取失败（{api_err}）且官方着陆页不可达（{err}），"
-                    "元数据核验未完成——本条仅按可达性/结构判定"), False
+        return (
+            "",
+            (
+                f"arXiv 元数据获取失败（{api_err}）且官方着陆页不可达（{err}），"
+                "元数据核验未完成——本条仅按可达性/结构判定"
+            ),
+            False,
+        )
     m = re.search(r"<title>(.*?)</title>", html_text, re.S | re.IGNORECASE)
     if not m:
-        return "", (f"arXiv 元数据获取失败（{api_err}），着陆页无标题可比对，"
-                    "元数据核验未完成"), False
+        return (
+            "",
+            (f"arXiv 元数据获取失败（{api_err}），着陆页无标题可比对，" "元数据核验未完成"),
+            False,
+        )
     page_title = re.sub(r"\s+", " ", m.group(1)).strip()
     # arXiv abs 页 <title> 形如 "[2607.22693] 标题"——剥掉 ID 前缀再比对
-    page_title = re.sub(r"^\[" + re.escape(arxiv_id) + r"\]\s*", "", page_title,
-                        count=1)
-    sim = difflib.SequenceMatcher(None, (title or "").lower(),
-                                  page_title.lower()).ratio()
+    page_title = re.sub(r"^\[" + re.escape(arxiv_id) + r"\]\s*", "", page_title, count=1)
+    sim = difflib.SequenceMatcher(None, (title or "").lower(), page_title.lower()).ratio()
     if title and sim < 0.50:
         if _alias_subset(title, page_title):
-            return "partial", (f"arXiv 元数据 API 失败（{api_err}），官方着陆页标题相似度"
-                               f"{sim:.2f} 但声称题名是登记题名的截短/别名（token 子集"
-                               "关系）→ 非编造，降级人工复核"
-                               f"（arXiv 实际为《{page_title[:60]}》）"), True
-        return "invalid", (f"arXiv 元数据 API 失败（{api_err}），官方着陆页标题相似度"
-                           f"仅 {sim:.2f} → ID 指向的不是这篇论文，疑似错引"
-                           f"（arXiv 实际为《{page_title[:60]}》）"), True
+            return (
+                "partial",
+                (
+                    f"arXiv 元数据 API 失败（{api_err}），官方着陆页标题相似度"
+                    f"{sim:.2f} 但声称题名是登记题名的截短/别名（token 子集"
+                    "关系）→ 非编造，降级人工复核"
+                    f"（arXiv 实际为《{page_title[:60]}》）"
+                ),
+                True,
+            )
+        return (
+            "invalid",
+            (
+                f"arXiv 元数据 API 失败（{api_err}），官方着陆页标题相似度"
+                f"仅 {sim:.2f} → ID 指向的不是这篇论文，疑似错引"
+                f"（arXiv 实际为《{page_title[:60]}》）"
+            ),
+            True,
+        )
     if title and sim < 0.82:
-        return "partial", (f"arXiv 元数据 API 失败（{api_err}），官方着陆页标题相似度 "
-                           f"{sim:.2f}，建议人工复核"), True
-    note = (f"arXiv 元数据 API 不稳（{api_err}），经官方着陆页标题比对确认"
-            + (f"（相似度 {sim:.2f}）" if title else "（引用未提供标题，仅确认存在）"))
+        return (
+            "partial",
+            (
+                f"arXiv 元数据 API 失败（{api_err}），官方着陆页标题相似度 "
+                f"{sim:.2f}，建议人工复核"
+            ),
+            True,
+        )
+    note = f"arXiv 元数据 API 不稳（{api_err}），经官方着陆页标题比对确认" + (
+        f"（相似度 {sim:.2f}）" if title else "（引用未提供标题，仅确认存在）"
+    )
     return "", note, True
 
 
@@ -855,24 +1140,24 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
     返回 (adjust, note, matched)：adjust ∈ {"", "partial", "invalid"}；
     matched=True 表示元数据成功取得且与声称标题一致。"""
     import xml.etree.ElementTree as ET
-    ns = {"a": "http://www.w3.org/2005/Atom",
-          "ax": "http://arxiv.org/schemas/atom"}
-    api_url = ("https://export.arxiv.org/api/query?id_list="
-               + quote(arxiv_id, safe="") + "&max_results=1")
+
+    ns = {"a": "http://www.w3.org/2005/Atom", "ax": "http://arxiv.org/schemas/atom"}
+    api_url = (
+        "https://export.arxiv.org/api/query?id_list=" + quote(arxiv_id, safe="") + "&max_results=1"
+    )
     if _ROOT._cb_open(api_url):
         return "", _ROOT._cb_skip_note(api_url) + "，未做 arXiv 元数据核验", False
     _ROOT._arxiv_rate_wait()
-    ua_rot = [f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research",
-              f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION}; +verified-deep-research)"]
+    ua_rot = [
+        f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research",
+        f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION}; +verified-deep-research)",
+    ]
     xml_text, fetch_err = None, ""
     for attempt in range(2):
-        req = urllib.request.Request(
-            api_url,
-            headers={"User-Agent": ua_rot[min(attempt, 1)]})
+        req = urllib.request.Request(api_url, headers={"User-Agent": ua_rot[min(attempt, 1)]})
         try:
             # v6.3.1 同着陆页：走 _urlopen_retry 拿代理自愈（HTTPError 仍即时上抛）
-            with _ROOT._urlopen_retry(req, timeout=timeout, attempts=2,
-                                      backoff=1.0) as resp:
+            with _ROOT._urlopen_retry(req, timeout=timeout, attempts=2, backoff=1.0) as resp:
                 xml_text = resp.read().decode("utf-8", "ignore")
             fetch_err = ""
             _ROOT._cb_record(api_url, False)
@@ -895,15 +1180,13 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
         root = ET.fromstring(xml_text)
     except ET.ParseError as e:
         # API 返回了非 XML（典型=反爬 HTML 页）——同样走着陆页 fallback
-        return _arxiv_landing_fallback(arxiv_id, title, timeout,
-                                       f"返回非预期格式（{e}）")
+        return _arxiv_landing_fallback(arxiv_id, title, timeout, f"返回非预期格式（{e}）")
     entries = root.findall("a:entry", ns)
     # v1.11 评审修正：反爬/错误页常是格式良好的 HTML（合法 XML、可解析成功），
     # 但它不是 Atom feed——绝不能据此判「查无记录 → invalid」误杀真论文。
     # feed 根元素校验失败 → 着陆页 fallback 恢复确定性。
     if not (root.tag == "feed" or root.tag.endswith("}feed")):
-        return _arxiv_landing_fallback(arxiv_id, title, timeout,
-                                       "返回非 Atom 格式")
+        return _arxiv_landing_fallback(arxiv_id, title, timeout, "返回非 Atom 格式")
     if not entries:
         return "invalid", "arXiv ID 在官方 API 查无记录 → 疑似编造引用", False
     entry = entries[0]
@@ -926,8 +1209,7 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
         m = re.match(r"(\d{4})", pub.text.strip())
         if m:
             meta_year = int(m.group(1))
-    sim = difflib.SequenceMatcher(None, (title or "").lower(),
-                                  meta_title.lower()).ratio()
+    sim = difflib.SequenceMatcher(None, (title or "").lower(), meta_title.lower()).ratio()
     # v2.0.0 arXiv 版本二级核验(零额外请求):entry id 自带版本号,与声称版本比对。
     # 引用未指定版本且最新版>1 → 提示「该论文存在多个修订版,引用未指定」;
     # 引用指定了旧版且最新版更高 → 提示可能有修订(同一响应内取数,零网络成本)。
@@ -944,24 +1226,39 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
         claimed_v = int(cm.group(1))
     if latest_v and latest_v > 1:
         if claimed_v is None:
-            ver_note = f"；注意：该论文已有 {latest_v} 个修订版本，引用未指定版本（arXiv 默认解析最新版）"
+            ver_note = (
+                f"；注意：该论文已有 {latest_v} 个修订版本，引用未指定版本（arXiv 默认解析最新版）"
+            )
             if _ROOT._OPTS.get("require_version"):
                 # v6.4.0 M3 严格档（默认 off 零行为变化）：多版本文且未指定版本
                 # → partial 封顶（引用语义漂移——Attention 7 版实测提示）。判定
                 # 走既有 partial 通路（sim 已一致时仅降级注记），绝不判 invalid
-                #（未指定版本≠编造）。
-                ver_note += "；--require-version 严格档：引用语义随版本漂移，降 partial 人工确认版本"
+                # （未指定版本≠编造）。
+                ver_note += (
+                    "；--require-version 严格档：引用语义随版本漂移，降 partial 人工确认版本"
+                )
                 return "partial", (f"arXiv 元数据核验一致{ver_note}"), True
         elif claimed_v < latest_v:
-            ver_note = (f"；注意：引用指向 v{claimed_v}，最新版为 v{latest_v}"
-                        "——请确认引用的是预期版本（旧版可能含未修正内容）")
+            ver_note = (
+                f"；注意：引用指向 v{claimed_v}，最新版为 v{latest_v}"
+                "——请确认引用的是预期版本（旧版可能含未修正内容）"
+            )
     if not title:
-        return "", (f"arXiv 元数据核验完成（引用未提供标题，无法比对；登记年份 "
-                    f"{meta_year or '未知'}）{ver_note}"), True
+        return (
+            "",
+            (
+                f"arXiv 元数据核验完成（引用未提供标题，无法比对；登记年份 "
+                f"{meta_year or '未知'}）{ver_note}"
+            ),
+            True,
+        )
     # v3.15 文字系统守卫（与 DOI 路径同规）
     if sim < 0.50 and _ROOT._script_family(title) not in ("none", _ROOT._script_family(meta_title)):
-        return "partial", (f"跨语言标题无法机器比对（相似度 {sim:.2f} 不作编造依据）"
-                           "→ 建议人工核对"), True
+        return (
+            "partial",
+            (f"跨语言标题无法机器比对（相似度 {sim:.2f} 不作编造依据）" "→ 建议人工核对"),
+            True,
+        )
     if sim < 0.50:
         # v5.5.0 标题别名守卫（整合并行会话 2026-10-26 补丁并经门审：截短/异序题名
         # 累计 4 次误判 invalid——STOP(0.42)、Neutropenia、Transaminitis、两篇综述同型。
@@ -970,23 +1267,35 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
         # invalid，不放开伪造口子。评审修订：CJK 无分隔符不能按词切——改字符级
         # 子集（去 CJK 停用字；≥2 词/字联合门不变）。
         def _lat(s):
-            return {t for t in re.sub(r"[^0-9a-z]+", " ", (s or "").lower()).split()
-                    if t not in ("a", "an", "the", "of", "for", "and", "on",
-                                 "in", "to", "with")}
+            return {
+                t
+                for t in re.sub(r"[^0-9a-z]+", " ", (s or "").lower()).split()
+                if t not in ("a", "an", "the", "of", "for", "and", "on", "in", "to", "with")
+            }
 
         def _cjk(s):
-            return {c for c in (s or "")
-                    if "\u4e00" <= c <= "\u9fff" and c not in "的与和及对在中"}
+            return {c for c in (s or "") if "\u4e00" <= c <= "\u9fff" and c not in "的与和及对在中"}
 
         _u_lat, _u_cjk = _lat(title), _cjk(title)
         _r_lat, _r_cjk = _lat(meta_title), _cjk(meta_title)
-        if (len(_u_lat) + len(_u_cjk) >= 2
-                and _u_lat <= _r_lat and _u_cjk <= _r_cjk):
-            return "partial", (f"arXiv 标题疑似截短/异序（相似度 {sim:.2f}，但用户题名"
-                               f"实词全部包含于登记题名）→ 建议引用登记全称："
-                               f"《{meta_title[:80]}》"), True
-        return "invalid", (f"arXiv 元数据标题相似度仅 {sim:.2f} → ID 指向的不是这篇论文，"
-                           f"疑似编造或错引（arXiv 实际为《{meta_title[:60]}》）"), True
+        if len(_u_lat) + len(_u_cjk) >= 2 and _u_lat <= _r_lat and _u_cjk <= _r_cjk:
+            return (
+                "partial",
+                (
+                    f"arXiv 标题疑似截短/异序（相似度 {sim:.2f}，但用户题名"
+                    f"实词全部包含于登记题名）→ 建议引用登记全称："
+                    f"《{meta_title[:80]}》"
+                ),
+                True,
+            )
+        return (
+            "invalid",
+            (
+                f"arXiv 元数据标题相似度仅 {sim:.2f} → ID 指向的不是这篇论文，"
+                f"疑似编造或错引（arXiv 实际为《{meta_title[:60]}》）"
+            ),
+            True,
+        )
     year_note = ""
     if meta_year and year:
         try:
@@ -995,7 +1304,11 @@ def arxiv_metadata_match(arxiv_id: str, title: str, year, timeout: float) -> tup
         except (TypeError, ValueError):
             pass
     if sim < 0.82:
-        return "partial", f"arXiv 元数据标题相似度 {sim:.2f}，建议人工复核{year_note}{ver_note}", True
+        return (
+            "partial",
+            f"arXiv 元数据标题相似度 {sim:.2f}，建议人工复核{year_note}{ver_note}",
+            True,
+        )
     return "", f"arXiv 元数据核验一致（相似度 {sim:.2f}）{year_note}{ver_note}", True
 
 
@@ -1009,14 +1322,14 @@ def wayback_available(url: str, timeout: float) -> str:
     # 实测教训：archive.org 对全量百分号编码的 url 参数不匹配（原样 200+快照，
     # %3A%2F 编码形式 200 但快照集为空）——必须原文直传，仅编码破坏外层查询的字符
     q = quote(url, safe=":/?&=#%@+!$,;'~()*[]-._")
-    wb_url = ("https://archive.org/wayback/available?url=" + q)
+    wb_url = "https://archive.org/wayback/available?url=" + q
     # 断路器看真正的外呼对象 archive.org（v1.6 二轮评审 P1 修正）——
     # 目标主机熔断不影响存档查询（死站查存档正是本函数的主用例）
     if _ROOT._cb_open(wb_url):
         return ""
     req = urllib.request.Request(
-        wb_url,
-        headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"})
+        wb_url, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"}
+    )
     for attempt in range(2):
         try:
             with urllib.request.urlopen(req, timeout=timeout) as resp:
@@ -1044,17 +1357,21 @@ def _fetch_landing_html(url: str, timeout: float):
     """手动逐跳抓取落地页（≤3 跳），每跳过 scheme+SSRF 双门，返回 HTML 或 None。
     断路器接线（审计 A3）：主机连续传输失败时本批跳过，与全局外呼同规。
     v4.8.0 自桥接内嵌提取到模块级——EB/OL 落地页对照（landing_title_check）复用。"""
+
     class _NoRedirect(urllib.request.HTTPRedirectHandler):
         def redirect_request(self, req, fp, code, msg, headers, newurl):
             return None
+
     for _hop in range(4):
         if not str(url).lower().startswith(("http://", "https://")):
             return None
         if _ROOT.ssrf_blocked(url) or _ROOT._cb_open(url):
             return None
         try:
-            req = urllib.request.Request(url, headers={
-                "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION})"})
+            req = urllib.request.Request(
+                url,
+                headers={"User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION})"},
+            )
             opener = urllib.request.build_opener(_NoRedirect)
             with opener.open(req, timeout=timeout) as resp:
                 html = resp.read(262144).decode("utf-8", "ignore")
@@ -1082,10 +1399,12 @@ def landing_title_check(url: str, title: str, timeout: float) -> tuple:
     if not html:
         return "", False
     cands = []
-    for pat in (r'<meta[^>]+name="citation_title"[^>]+content="([^"]+)"',
-                r'<meta[^>]+content="([^"]+)"[^>]+name="citation_title"',
-                r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"',
-                r"<title[^>]*>(.*?)</title>"):
+    for pat in (
+        r'<meta[^>]+name="citation_title"[^>]+content="([^"]+)"',
+        r'<meta[^>]+content="([^"]+)"[^>]+name="citation_title"',
+        r'<meta[^>]+property="og:title"[^>]+content="([^"]+)"',
+        r"<title[^>]*>(.*?)</title>",
+    ):
         m = re.search(pat, html, re.I | re.S)
         if m and m.group(1).strip():
             cands.append(re.sub(r"\s+", " ", m.group(1)).strip())
@@ -1104,7 +1423,10 @@ def landing_title_check(url: str, title: str, timeout: float) -> tuple:
     tw = set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", str(title).lower()))
     subset_hit = any(
         (cw := set(re.findall(r"[a-z0-9\u4e00-\u9fff]+", c.lower())))
-        and len(cw) >= 3 and cw.issubset(tw) for c in cands)
+        and len(cw) >= 3
+        and cw.issubset(tw)
+        for c in cands
+    )
     if best >= 0.75 or subset_hit:
         return (f"落地页题名对照一致（相似度 {best:.2f}）", True)
     if best >= 0.60:
@@ -1116,18 +1438,24 @@ def check_url(url: str, timeout: float, retries: int = 1) -> tuple:
     """返回 (reachable, status, note)。reachable 以 2xx/3xx/429(反爬) 计。
     瞬态网络错误（超时/连接重置）自动重试一次——国内网络偶发抖动不误判。
     内网/环回地址直接拒绝（SSRF 防护），不发起请求。
-    v1.6：主机断路器生效；传输失败按成因给可操作话术（超时给 --timeout 建议）。"""
+    v1.6：主机断路器生效；传输失败按成因给可操作话术（超时给 --timeout 建议）。
+    v6.6.0 F62：重定向逐跳 SSRF 复核（GuardedRedirectHandler）——入口字面量
+    防护之外的「公网 URL 经 302 跳内网」绕过面封死。"""
     if _ROOT.ssrf_blocked(url):
         return False, None, "内网/保留地址，验证请求已拒绝（SSRF 防护）"
     if _ROOT._cb_open(url):
         return False, None, _ROOT._cb_skip_note(url)
     note = ""
     for attempt in range(retries + 1):
-        req = urllib.request.Request(url, method="HEAD", headers={
-            "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION}; +verified-deep-research)",
-            "Accept": "*/*",
-        })
-        opener = urllib.request.build_opener(urllib.request.HTTPRedirectHandler())
+        req = urllib.request.Request(
+            url,
+            method="HEAD",
+            headers={
+                "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION}; +verified-deep-research)",
+                "Accept": "*/*",
+            },
+        )
+        opener = urllib.request.build_opener(_ROOT.GuardedRedirectHandler())
         transient = False
         use_direct = False
         for method in ("HEAD", "GET"):
@@ -1146,23 +1474,37 @@ def check_url(url: str, timeout: float, retries: int = 1) -> tuple:
             except (urllib.error.URLError, TimeoutError, OSError) as e:
                 if method == "HEAD":
                     continue
+                # v6.6.0 F62：SSRF 逐跳拒绝是主动防护动作，不是传输失败——
+                # 如实透出且不记断路器（不拖累同主机其他条目）；话术常量
+                # 单一来源（ch_netio._SSRF_REFUSAL_NOTE）
+                if _ROOT._SSRF_REFUSAL_NOTE in str(e):
+                    return False, None, str(e)
                 # v6.3.1 代理自愈：环境有代理且 GET 传输失败 → 无代理直连重试一次。
                 # 必须重建 Request——代理路径已把代理地址烘焙进原 req.host
                 # （单变量实验实证：复用污染对象时换无代理 opener 仍连死代理）。
                 if (not use_direct) and urllib.request.getproxies():
                     use_direct = True
-                    direct_req = urllib.request.Request(url, method="GET", headers={
-                        "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION};"
-                                      " +verified-deep-research)",
-                        "Accept": "*/*"})
+                    direct_req = urllib.request.Request(
+                        url,
+                        method="GET",
+                        headers={
+                            "User-Agent": f"Mozilla/5.0 (compatible; cite-holmes/{_ROOT.VERSION};"
+                            " +verified-deep-research)",
+                            "Accept": "*/*",
+                        },
+                    )
                     direct_opener = urllib.request.build_opener(
-                        urllib.request.HTTPRedirectHandler(),
-                        urllib.request.ProxyHandler({}))
+                        _ROOT.GuardedRedirectHandler(),
+                        urllib.request.ProxyHandler({}),
+                    )
                     try:
                         with direct_opener.open(direct_req, timeout=timeout) as resp:
                             _ROOT._cb_record(url, False)
-                            return True, resp.status, (
-                                f"GET {resp.status}（代理栈故障，无代理直连自愈）")
+                            return (
+                                True,
+                                resp.status,
+                                (f"GET {resp.status}（代理栈故障，无代理直连自愈）"),
+                            )
                     except urllib.error.HTTPError as e2:
                         _ROOT._cb_record(url, False)  # 站点有响应≠传输失败
                         if e2.code == 429:
@@ -1174,8 +1516,11 @@ def check_url(url: str, timeout: float, retries: int = 1) -> tuple:
                 msg = str(e)
                 if isinstance(e, TimeoutError) or "timed out" in msg or "timeout" in msg.lower():
                     note = "连接超时（站点慢或网络受限），建议 --timeout 20 重试"
-                elif ("getaddrinfo" in msg or "name or service" in msg.lower()
-                        or "no address" in msg.lower()):
+                elif (
+                    "getaddrinfo" in msg
+                    or "name or service" in msg.lower()
+                    or "no address" in msg.lower()
+                ):
                     note = "域名无法解析，连接失败（站点可能已下线或被网络拦截）"
                 elif "refused" in msg or "reset" in msg.lower():
                     note = "连接被拒/重置（站点或网络问题）"
@@ -1211,8 +1556,12 @@ def _retraction_classify(raw_type: str) -> str:
     "expression_of_concern", "correction", ""}（未识别返回小写原文，调用方按
     未分档处理——查无永不判死同样适用于「不认识的通告类型」）。"""
     t = (raw_type or "").strip().lower().replace("-", "_").replace(" ", "_")
-    if t in ("retraction", "retraction_notice", "retract_and_republish",
-             "retraction_of_publication"):
+    if t in (
+        "retraction",
+        "retraction_notice",
+        "retract_and_republish",
+        "retraction_of_publication",
+    ):
         return "retraction"
     if t in ("partial_retraction", "partial_retraction_notice"):
         return "partial_retraction"
@@ -1225,26 +1574,29 @@ def _retraction_classify(raw_type: str) -> str:
     return t
 
 
-def _retraction_nature_note(nature: str, when: str, notice: str,
-                            source_label: str) -> str:
+def _retraction_nature_note(nature: str, when: str, notice: str, source_label: str) -> str:
     """v4.1.0 按通告分档生成中文注记（降级语义由调用方统一接线）。"""
     when_note = f"（{when}）" if when else ""
     extra = f"，通告 {notice}" if notice else ""
     if nature == "retraction":
-        return (f"论文已撤稿（{source_label}{when_note}{extra}）"
-                "→ 不得作为有效证据引用")
+        return f"论文已撤稿（{source_label}{when_note}{extra}）" "→ 不得作为有效证据引用"
     if nature == "partial_retraction":
-        return (f"论文部分撤稿（{source_label}{when_note}{extra}）——撤稿部分"
-                "不得作为证据，请人工核对结论边界")
+        return (
+            f"论文部分撤稿（{source_label}{when_note}{extra}）——撤稿部分"
+            "不得作为证据，请人工核对结论边界"
+        )
     if nature == "withdrawal":
-        return (f"论文已被出版方撤回（{source_label}{when_note}{extra}）"
-                "→ 不得作为有效证据引用")
+        return f"论文已被出版方撤回（{source_label}{when_note}{extra}）" "→ 不得作为有效证据引用"
     if nature == "expression_of_concern":
-        return (f"该文存在编辑关注通告 Expression of Concern"
-                f"（{source_label}{when_note}{extra}）——证据效力存疑，转人工复核")
+        return (
+            f"该文存在编辑关注通告 Expression of Concern"
+            f"（{source_label}{when_note}{extra}）——证据效力存疑，转人工复核"
+        )
     if nature == "correction":
-        return (f"该文存在更正/勘误通告（{source_label}{when_note}{extra}）"
-                "——仅提示引用时留意勘误内容，不影响有效性判定")
+        return (
+            f"该文存在更正/勘误通告（{source_label}{when_note}{extra}）"
+            "——仅提示引用时留意勘误内容，不影响有效性判定"
+        )
     return f"存在出版方通告（{nature}，{source_label}{when_note}{extra}）"
 
 
@@ -1263,18 +1615,35 @@ def crossref_retraction_check(doi: str, timeout: float) -> dict:
                 "notice_doi": str, "when": str,
                 "source": "local"|"crossref"|"",
                 "check_failed": bool}         # 传输失败（重试耗尽）——非「未撤稿」"""
-    failed = {"retracted": False, "nature": "", "notice_doi": "", "when": "",
-              "source": "", "check_failed": True}
-    clean = {"retracted": False, "nature": "", "notice_doi": "", "when": "",
-             "source": "", "check_failed": False}
+    failed = {
+        "retracted": False,
+        "nature": "",
+        "notice_doi": "",
+        "when": "",
+        "source": "",
+        "check_failed": True,
+    }
+    clean = {
+        "retracted": False,
+        "nature": "",
+        "notice_doi": "",
+        "when": "",
+        "source": "",
+        "check_failed": False,
+    }
     hit = _retraction_local(doi)
     if hit is not None:
         raw_date = (hit.get("date") or "").split(" 0:00")[0]  # CSV 时间残渣剥除
         nature = _retraction_classify(hit.get("type") or "Retraction")
         family = nature in ("retraction", "partial_retraction", "withdrawal")
-        return {"retracted": family, "nature": nature,
-                "notice_doi": "", "when": raw_date, "source": "local",
-                "check_failed": False}
+        return {
+            "retracted": family,
+            "nature": nature,
+            "notice_doi": "",
+            "when": raw_date,
+            "source": "local",
+            "check_failed": False,
+        }
     mailto = _ROOT._OPTS.get("mailto") or ""
     url = f"https://api.crossref.org/works/{quote(doi, safe='()/')}"
     if mailto:
@@ -1283,8 +1652,12 @@ def crossref_retraction_check(doi: str, timeout: float) -> dict:
         return dict(clean)
     try:
         req = urllib.request.Request(
-            url, headers={"User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research "
-                                        "(https://skillhub.cn/skills/cite-holmes)"})
+            url,
+            headers={
+                "User-Agent": f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research "
+                "(https://skillhub.cn/skills/cite-holmes)"
+            },
+        )
         with _ROOT._urlopen_retry(req, timeout) as resp:
             m = (json.loads(resp.read().decode("utf-8", "ignore")) or {}).get("message") or {}
         _ROOT._cb_record(url, False)
@@ -1297,11 +1670,16 @@ def crossref_retraction_check(doi: str, timeout: float) -> dict:
             notice = item.get("DOI") or ""
             when = ((item.get("updated") or {}).get("date-time") or "")[:10]
             if nature in ("retraction", "partial_retraction", "withdrawal"):
-                return {"retracted": True, "nature": nature, "notice_doi": notice,
-                        "when": when, "source": "crossref", "check_failed": False}
+                return {
+                    "retracted": True,
+                    "nature": nature,
+                    "notice_doi": notice,
+                    "when": when,
+                    "source": "crossref",
+                    "check_failed": False,
+                }
             # EoC/更正：不升级为 retracted，但分档记录（EoC 由调用方降级转人工）
-            clean.update(nature=nature, notice_doi=notice, when=when,
-                         source="crossref")
+            clean.update(nature=nature, notice_doi=notice, when=when, source="crossref")
         return dict(clean)
     except urllib.error.HTTPError:
         _ROOT._cb_record(url, False, degrade=False)  # 站点有响应（含 429 限流）：不计入全局降级
@@ -1309,7 +1687,6 @@ def crossref_retraction_check(doi: str, timeout: float) -> dict:
     except Exception:
         _ROOT._cb_record(url, True)
         return dict(failed)
-
 
 
 def _openalex_fetch(url: str, timeout: float, ua: str):
@@ -1356,18 +1733,22 @@ def openalex_works_lookup(title: str, year, timeout: float) -> tuple:
     if len((title or "").strip()) < 18:
         return "", False, ""
     q = quote(title.strip(), safe="")
-    url = (f"https://api.openalex.org/works?search={q}&per-page=3"
-           "&select=display_name,publication_year,doi")
+    url = (
+        f"https://api.openalex.org/works?search={q}&per-page=3"
+        "&select=display_name,publication_year,doi"
+    )
     key = _ROOT._OPTS.get("openalex_key") or ""
     if key:
         url += f"&api_key={quote(key, safe='')}"
     try:
         if _ROOT._cb_open(url):
             return "", False, ""
-        results = (_ROOT._openalex_fetch(
-            url, timeout,
-            f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research")
-            or {}).get("results") or []
+        results = (
+            _ROOT._openalex_fetch(
+                url, timeout, f"cite-holmes/{_ROOT.VERSION}; +verified-deep-research"
+            )
+            or {}
+        ).get("results") or []
         _ROOT._cb_record(url, False)
         if not results:
             return "OpenAlex 未检索到明显匹配条目（可能未被收录，不作为编造依据）", False, ""
@@ -1386,8 +1767,7 @@ def openalex_works_lookup(title: str, year, timeout: float) -> tuple:
             if year_ok and (best is None or sim > best[0]):
                 best = (sim, w)
         if best is None:
-            return ("OpenAlex 未检索到明显匹配条目（可能未被收录，不作为编造依据）",
-                    False, "")
+            return ("OpenAlex 未检索到明显匹配条目（可能未被收录，不作为编造依据）", False, "")
         sim, w = best
         mt = re.sub(r"\s+", " ", str(w.get("display_name") or "")).strip()
         my = w.get("publication_year")
@@ -1396,19 +1776,33 @@ def openalex_works_lookup(title: str, year, timeout: float) -> tuple:
         if sim >= 0.82:
             return (f"OpenAlex 书目确认存在：{mt[:60]}{year_note}", True, doi_c)
         if sim >= 0.60:
-            return (f"OpenAlex 近似条目（标题相似度 {sim:.2f}）：{mt[:60]}{year_note}，"
-                    "建议人工复核", False, "")
-        return (f"OpenAlex 未检索到明显匹配（最高相似度 {sim:.2f}）；"
-                "可能未被收录或较新，不作为编造依据", False, "")
+            return (
+                f"OpenAlex 近似条目（标题相似度 {sim:.2f}）：{mt[:60]}{year_note}，" "建议人工复核",
+                False,
+                "",
+            )
+        return (
+            f"OpenAlex 未检索到明显匹配（最高相似度 {sim:.2f}）；"
+            "可能未被收录或较新，不作为编造依据",
+            False,
+            "",
+        )
     except urllib.error.HTTPError as e:
         _ROOT._cb_record(url, True, degrade=False)  # 站点有响应：不计入全局网络降级
         if e.code == 403:
-            return ("OpenAlex 拒绝访问（403）——2026 年起生产调用需 API key（无 key 每日仅 "
-                    "100 credits 测试额度），可用 --openalex-key 或环境变量 OPENALEX_API_KEY 配置后重试",
-                    False, "")
+            return (
+                "OpenAlex 拒绝访问（403）——2026 年起生产调用需 API key（无 key 每日仅 "
+                "100 credits 测试额度），可用 --openalex-key 或环境变量 OPENALEX_API_KEY 配置后重试",
+                False,
+                "",
+            )
         if e.code == 429:
-            return ("OpenAlex 限流（429）——生产调用建议 --openalex-key 或环境变量 "
-                    "OPENALEX_API_KEY，稍后自动重试即可", False, "")
+            return (
+                "OpenAlex 限流（429）——生产调用建议 --openalex-key 或环境变量 "
+                "OPENALEX_API_KEY，稍后自动重试即可",
+                False,
+                "",
+            )
         return "", False, ""
     except Exception:
         _ROOT._cb_record(url, True)
@@ -1423,7 +1817,6 @@ def openalex_title_check(title: str, timeout: float) -> str:
     return note
 
 
-
 def s2_citation_contexts(doi: str, timeout: float, max_samples: int = 3) -> dict:
     """v3.0.0 L3 引文语境层（Scite 平替的数据面）：对已 verified 的 DOI 引文拉取
     Semantic Scholar citations 端点(fields=contexts,intents,isInfluential)。
@@ -1433,8 +1826,11 @@ def s2_citation_contexts(doi: str, timeout: float, max_samples: int = 3) -> dict
     绝不装作全知。失败静默跳过（语境是增强信号,非判定依据）。CC BY 4.0 数据源。
     返回 {}（无数据）或 {"cited_by": int, "samples": [{"context","intents","influential","citing_title"}],
     "coverage": float}。"""
-    url = ("https://api.semanticscholar.org/graph/v1/paper/DOI:"
-           + quote(doi, safe="") + "/citations?fields=contexts,intents,isInfluential,title&limit=30")
+    url = (
+        "https://api.semanticscholar.org/graph/v1/paper/DOI:"
+        + quote(doi, safe="")
+        + "/citations?fields=contexts,intents,isInfluential,title&limit=30"
+    )
     key = _ROOT._OPTS.get("s2_key") or ""
     if key:
         url += "&api_key=" + quote(key, safe="")
@@ -1449,7 +1845,7 @@ def s2_citation_contexts(doi: str, timeout: float, max_samples: int = 3) -> dict
             req = urllib.request.Request(url, headers=headers)
             with urllib.request.urlopen(req, timeout=timeout) as resp:
                 _ROOT._cb_record(url, False)
-                data = (json.loads(resp.read().decode("utf-8", "ignore")) or {})
+                data = json.loads(resp.read().decode("utf-8", "ignore")) or {}
             break
         except urllib.error.HTTPError as e:
             _ROOT._cb_record(url, False)
@@ -1473,12 +1869,19 @@ def s2_citation_contexts(doi: str, timeout: float, max_samples: int = 3) -> dict
     samples = []
     for it in with_ctx[:max_samples]:
         cp = it.get("citingPaper") or {}
-        samples.append({"context": (it.get("contexts") or [""])[0][:220],
-                        "intents": it.get("intents") or [],
-                        "influential": bool(it.get("isInfluential")),
-                        "citing_title": (cp.get("title") or "")[:80]})
-    return {"cited_by": len(items), "samples": samples,
-            "coverage": round(len(with_ctx) / len(items), 2)}
+        samples.append(
+            {
+                "context": (it.get("contexts") or [""])[0][:220],
+                "intents": it.get("intents") or [],
+                "influential": bool(it.get("isInfluential")),
+                "citing_title": (cp.get("title") or "")[:80],
+            }
+        )
+    return {
+        "cited_by": len(items),
+        "samples": samples,
+        "coverage": round(len(with_ctx) / len(items), 2),
+    }
 
 
 def s2_doi_confirm(doi: str, title: str, timeout: float) -> tuple:
@@ -1491,8 +1894,11 @@ def s2_doi_confirm(doi: str, title: str, timeout: float) -> tuple:
     返回 (matched, note)。key 只走 x-api-key 头（query 参数会进代理日志）。"""
     if not (title or "").strip():
         return False, ""  # 无标题无从比对，不浪费限速调用
-    url = ("https://api.semanticscholar.org/graph/v1/paper/DOI:"
-           + quote(doi, safe="") + "?fields=title,year")
+    url = (
+        "https://api.semanticscholar.org/graph/v1/paper/DOI:"
+        + quote(doi, safe="")
+        + "?fields=title,year"
+    )
     key = _ROOT._OPTS.get("s2_key") or ""
     if _ROOT._cb_open(url):
         return False, ""
@@ -1518,7 +1924,7 @@ def s2_doi_confirm(doi: str, title: str, timeout: float) -> tuple:
     t = title.strip().lower()
     mt_l = mt.lower()
     sim = difflib.SequenceMatcher(None, t, mt_l).ratio()
-    pfx = difflib.SequenceMatcher(None, t, mt_l[:len(t)]).ratio() if len(mt_l) >= len(t) else 0.0
+    pfx = difflib.SequenceMatcher(None, t, mt_l[: len(t)]).ratio() if len(mt_l) >= len(t) else 0.0
     if max(sim, pfx) < 0.82:
         return False, ""  # 不一致静默：绝不以 S2 的不一致作负面判据
     year_note = f"（{my}）" if my else ""
@@ -1537,8 +1943,10 @@ def s2_title_confirm(title: str, timeout: float) -> tuple:
     if len(t) < 18:
         return False, ""  # 过短标题检索噪声大，不浪费限速调用
     q = quote(re.sub(r"[-\u2010-\u2015]+", " ", t), safe="")
-    url = (f"https://api.semanticscholar.org/graph/v1/paper/search"
-           f"?query={q}&fields=title,year&limit=1")
+    url = (
+        f"https://api.semanticscholar.org/graph/v1/paper/search"
+        f"?query={q}&fields=title,year&limit=1"
+    )
     key = _ROOT._OPTS.get("s2_key") or ""
     if _ROOT._cb_open(url):
         return False, ""
@@ -1568,10 +1976,12 @@ def s2_title_confirm(title: str, timeout: float) -> tuple:
     t_l = t.lower()
     mt_l = mt.lower()
     sim = difflib.SequenceMatcher(None, t_l, mt_l).ratio()
-    pfx = difflib.SequenceMatcher(None, t_l, mt_l[:len(t_l)]).ratio() if len(mt_l) >= len(t_l) else 0.0
+    pfx = (
+        difflib.SequenceMatcher(None, t_l, mt_l[: len(t_l)]).ratio()
+        if len(mt_l) >= len(t_l)
+        else 0.0
+    )
     if max(sim, pfx) < 0.82:
         return False, ""  # 不一致静默：绝不以 S2 的不一致作负面判据
     year_note = f"（{my}）" if my else ""
     return True, f"Semantic Scholar 标题检索确认存在：{mt[:60]}{year_note}"
-
-
